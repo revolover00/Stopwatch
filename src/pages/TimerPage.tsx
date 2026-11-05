@@ -1,30 +1,17 @@
-import { useEffect, useState } from 'react';
-import { FlipClock } from '../components/flip/FlipClock';
-import { ClockStage } from '../components/ui/ClockStage';
-import { HelpSections } from '../components/ui/HelpSections';
-import { PageHeading } from '../components/ui/PageHeading';
-import { RelatedTools, type ToolLink } from '../components/ui/RelatedTools';
-import { TimerControls, type RunState } from '../components/ui/TimerControls';
-import { TIMER_HELP } from '../content/help';
-import { useSettings } from '../context/SettingsContext';
-import { useCountdown } from '../hooks/useCountdown';
-import { toHmsParts } from '../lib/clock';
-import { playChime } from '../lib/sound';
-import { formatDuration } from '../lib/time';
+import React, { useEffect, useState } from 'react';
+import { BellRing, Pause, Play, RotateCcw } from 'lucide-react';
+import { FlipCard, FlipColon } from '../components/FlipCard';
+import type { AppSettings } from '../types';
+import { playSoundOnce, startAlarmLoop, stopAlarmLoop } from '../utils/soundEngine';
+import { getStrings } from '../i18n';
 
-const TOOLS: readonly ToolLink[] = [
-  { to: '/stopwatch/', title: 'Stopwatch', description: 'Count up, with laps and splits.' },
-  { to: '/countdown/', title: 'Countdown', description: 'Days left until a date.' },
-  { to: '/study-timer/', title: 'Study timer', description: 'Focus and break sessions.' },
-  { to: '/alarm/', title: 'Alarm', description: 'Wake up to a flip clock.' },
-];
-
-interface Preset {
-  readonly label: string;
-  readonly seconds: number;
+interface TimerPageProps {
+  settings: AppSettings;
+  externalSecondsPreset?: number | null;
+  onConsumeExternalPreset?: () => void;
 }
 
-const PRESETS: readonly Preset[] = [
+const PRESETS: { label: string; seconds: number }[] = [
   { label: '15 sec', seconds: 15 },
   { label: '20 sec', seconds: 20 },
   { label: '30 sec', seconds: 30 },
@@ -43,175 +30,398 @@ const PRESETS: readonly Preset[] = [
   { label: '60 min', seconds: 3600 },
 ];
 
-const DEFAULT_SECONDS = 300;
+const DIR_SECONDS = [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 45, 50, 60, 90, 100, 1000];
+const DIR_MINUTES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40, 45, 50, 60, 75, 90, 120, 180];
+const DIR_HOURS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 18, 24, 36, 48, 72];
 
-export function TimerPage() {
-  const { settings } = useSettings();
-  const [preset, setPreset] = useState<number>(DEFAULT_SECONDS);
-  const [custom, setCustom] = useState({ hours: '0', minutes: '5', seconds: '0' });
+export const TimerPage: React.FC<TimerPageProps> = ({
+  settings,
+  externalSecondsPreset,
+  onConsumeExternalPreset,
+}) => {
+  const t = getStrings(settings.language);
+  const isAr = settings.language === 'ar';
 
-  const countdown = useCountdown(DEFAULT_SECONDS * 1000, () => {
-    if (settings.soundEnabled) playChime(settings.volume);
-    document.title = 'Time’s up — Timer';
-  });
-  const { status, remainingMs, durationMs, start, pause, resume, reset, setDuration } = countdown;
+  const [totalSeconds, setTotalSeconds] = useState<number>(300);
+  const [remainingSeconds, setRemainingSeconds] = useState<number>(300);
+  const [running, setRunning] = useState<boolean>(false);
+  const [ringing, setRinging] = useState<boolean>(false);
 
-  const parts = toHmsParts(status === 'idle' ? durationMs : remainingMs);
+  const [inH, setInH] = useState<number>(0);
+  const [inM, setInM] = useState<number>(5);
+  const [inS, setInS] = useState<number>(0);
+
+  const syncCustomInputs = (secs: number) => {
+    setInH(Math.floor(secs / 3600));
+    setInM(Math.floor((secs % 3600) / 60));
+    setInS(secs % 60);
+  };
 
   useEffect(() => {
-    document.title =
-      status === 'running' || status === 'paused'
-        ? `${formatDuration(remainingMs)} — Timer`
-        : 'Timer — FlipDeck';
-  }, [status, remainingMs]);
+    if (externalSecondsPreset && externalSecondsPreset > 0) {
+      const secs = Math.min(99 * 3600 + 59 * 60 + 59, externalSecondsPreset);
+      setRunning(false);
+      setTotalSeconds(secs);
+      setRemainingSeconds(secs);
+      syncCustomInputs(secs);
+      onConsumeExternalPreset?.();
+    }
+  }, [externalSecondsPreset, onConsumeExternalPreset]);
 
-  const applyPreset = (seconds: number): void => {
-    setPreset(seconds);
-    setDuration(seconds * 1000);
+  useEffect(() => {
+    return () => stopAlarmLoop();
+  }, []);
+
+  useEffect(() => {
+    if (!running) return;
+    const id = window.setInterval(() => {
+      setRemainingSeconds((prev) => {
+        if (prev <= 1) {
+          setRunning(false);
+          setRinging(true);
+          if (settings.soundEnabled) {
+            if (settings.ringUntilStopped) {
+              startAlarmLoop(settings.soundProfile, settings.volume, settings.gradualVolume);
+            } else {
+              playSoundOnce(settings.soundProfile, settings.volume);
+            }
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [running, settings]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (ringing) {
+        if (e.key === 'Escape') {
+          stopAlarmLoop();
+          setRinging(false);
+          setRemainingSeconds(totalSeconds);
+        }
+        return;
+      }
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.code === 'Space' && !e.repeat && totalSeconds > 0) {
+        e.preventDefault();
+        setRemainingSeconds((rem) => (rem === 0 ? totalSeconds : rem));
+        setRunning((r) => !r);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [ringing, totalSeconds]);
+
+  const applyDuration = (secs: number) => {
+    const safe = Math.max(0, Math.min(99 * 3600 + 59 * 60 + 59, secs));
+    setRunning(false);
+    setRinging(false);
+    setTotalSeconds(safe);
+    setRemainingSeconds(safe);
   };
 
-  const applyCustom = (): void => {
-    const hours = Number(custom.hours) || 0;
-    const minutes = Number(custom.minutes) || 0;
-    const seconds = Number(custom.seconds) || 0;
-    const total = (hours * 3600 + minutes * 60 + seconds) * 1000;
-    if (total <= 0) return;
-    setPreset(-1);
-    setDuration(total);
+  const handleSelectPreset = (secs: number) => {
+    applyDuration(secs);
+    syncCustomInputs(secs);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const runState: RunState = status;
-  const statusText =
-    status === 'running' ? 'Counting down' : status === 'paused' ? 'Paused' : status === 'finished' ? 'Finished' : 'Ready';
+  const handleInputChange = (nextH: number, nextM: number, nextS: number) => {
+    const h = Math.max(0, Math.min(99, nextH || 0));
+    const m = Math.max(0, Math.min(59, nextM || 0));
+    const s = Math.max(0, Math.min(59, nextS || 0));
+    setInH(h);
+    setInM(m);
+    setInS(s);
+    applyDuration(h * 3600 + m * 60 + s);
+  };
+
+  const handleDismissRing = () => {
+    stopAlarmLoop();
+    setRinging(false);
+    setRemainingSeconds(totalSeconds);
+  };
+
+  const handleRestartFromRing = () => {
+    stopAlarmLoop();
+    setRinging(false);
+    setRemainingSeconds(totalSeconds);
+    setRunning(true);
+  };
+
+  const hrs = String(Math.floor(remainingSeconds / 3600)).padStart(2, '0');
+  const mins = String(Math.floor((remainingSeconds % 3600) / 60)).padStart(2, '0');
+  const secs = String(remainingSeconds % 60).padStart(2, '0');
+
+  const setH = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+  const setM = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+  const setS = String(totalSeconds % 60).padStart(2, '0');
+  const ringDurationText = setH === '00' ? `${setM}:${setS}` : `${setH}:${setM}:${setS}`;
+
+  const isPausedMidway = !running && remainingSeconds > 0 && remainingSeconds < totalSeconds;
+  const progress =
+    totalSeconds > 0 ? Math.min(1, Math.max(0, 1 - remainingSeconds / totalSeconds)) : 0;
 
   return (
     <>
-      <PageHeading
-        title="Timer"
-        lead="Choose a preset or type an exact duration. The cards count the time that is left, and a chime marks zero."
-      />
-
-      <div className="mt-6">
-        <ClockStage
-          status={runState}
-          statusText={statusText}
-          footer={
-            <div className="flex flex-col items-center gap-5">
-              <TimerControls
-                state={runState}
-                onStart={() => start(durationMs)}
-                onPause={pause}
-                onResume={resume}
-                onReset={reset}
-                resetDisabled={status === 'idle' && durationMs === DEFAULT_SECONDS * 1000}
-              />
-              <p className="text-caption text-muted">
-                Set to{' '}
-                <span className="numeric text-ink">{formatDuration(durationMs)}</span>
-                {status === 'idle' ? '' : status === 'finished' ? ' · finished' : ' · running'}
-              </p>
+      <div className="page-content-wrapper">
+        <div id="timer-page" className="page-container">
+          <div className="timer-face">
+            <div
+              className={`flip-display ${ringing ? 'is-finished' : ''}`.trim()}
+              role="timer"
+              aria-label={`${hrs} hours ${mins} minutes ${secs} seconds`}
+            >
+              <FlipCard value={hrs} srLabel={`${hrs} Hours`} />
+              <FlipColon />
+              <FlipCard value={mins} srLabel={`${mins} Minutes`} />
+              <FlipColon />
+              <FlipCard value={secs} srLabel={`${secs} Seconds`} />
             </div>
-          }
-        >
-          <FlipClock
-            groups={[
-              { value: parts.hours, label: 'Hours' },
-              { value: parts.minutes, label: 'Minutes' },
-              { value: parts.seconds, label: 'Seconds' },
-            ]}
-            accessibleText={`Timer ${formatDuration(remainingMs)} remaining`}
-          />
-        </ClockStage>
+
+            <div
+              className={`timer-progress ${running || isPausedMidway ? 'running' : ''}`.trim()}
+              aria-hidden="true"
+            >
+              <div
+                className="timer-progress-bar"
+                style={{ transform: `scaleX(${progress})` }}
+              />
+            </div>
+          </div>
+
+          {/* Primary Equal Controls */}
+          <div className="controls equal hide-in-fullscreen">
+            <button
+              type="button"
+              disabled={!running && remainingSeconds === totalSeconds}
+              onClick={() => {
+                setRunning(false);
+                setRemainingSeconds(totalSeconds);
+              }}
+              className="btn btn-lg btn-secondary"
+            >
+              <RotateCcw className="w-[18px] h-[18px]" />
+              <span>{t.reset}</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={totalSeconds === 0}
+              onClick={() => {
+                if (remainingSeconds === 0) setRemainingSeconds(totalSeconds);
+                setRunning((r) => !r);
+              }}
+              className="btn btn-lg btn-primary"
+            >
+              {running ? (
+                <>
+                  <Pause className="w-[18px] h-[18px]" />
+                  <span>{t.pause}</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-[18px] h-[18px]" />
+                  <span>{isPausedMidway ? t.resume : t.start}</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* 16 Authentic Preset Chips + Custom Time H:M:S */}
+          <div className={`timer-setup hide-in-fullscreen ${running ? 'locked' : ''}`.trim()}>
+            <div id="presets-container" role="group" aria-label="Timer presets">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  disabled={running}
+                  onClick={() => handleSelectPreset(p.seconds)}
+                  className={`chip ${totalSeconds === p.seconds ? 'active' : ''}`.trim()}
+                  dir="ltr"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="custom-time-group">
+              <span className="custom-time-heading">{t.customTime}</span>
+              <div className="custom-time" aria-label={t.customTime}>
+                <div className="custom-time-field">
+                  <input
+                    id="timer-hours-input"
+                    type="number"
+                    min={0}
+                    max={99}
+                    value={inH}
+                    disabled={running}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => handleInputChange(Number(e.target.value), inM, inS)}
+                    className="time-input"
+                  />
+                  <label htmlFor="timer-hours-input">{t.hours}</label>
+                </div>
+                <span className="custom-time-colon" aria-hidden="true">
+                  :
+                </span>
+                <div className="custom-time-field">
+                  <input
+                    id="timer-minutes-input"
+                    type="number"
+                    min={0}
+                    max={59}
+                    value={inM}
+                    disabled={running}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => handleInputChange(inH, Number(e.target.value), inS)}
+                    className="time-input"
+                  />
+                  <label htmlFor="timer-minutes-input">{t.minutes}</label>
+                </div>
+                <span className="custom-time-colon" aria-hidden="true">
+                  :
+                </span>
+                <div className="custom-time-field">
+                  <input
+                    id="timer-seconds-input"
+                    type="number"
+                    min={0}
+                    max={59}
+                    value={inS}
+                    disabled={running}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => handleInputChange(inH, inM, Number(e.target.value))}
+                    className="time-input"
+                  />
+                  <label htmlFor="timer-seconds-input">{t.seconds}</label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <section aria-labelledby="presets-heading" className="mt-4 rounded-2xl border border-line bg-panel p-4 sm:p-5">
-        <h2 id="presets-heading" className="label">
-          Quick presets
-        </h2>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {PRESETS.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              onClick={() => applyPreset(item.seconds)}
-              aria-pressed={preset === item.seconds}
-              className={`chip ${preset === item.seconds ? 'chip-active' : 'hover:border-ink/25'}`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+      {/* Editorial Guide + All Timers Directory */}
+      <article className="info-article">
+        {isAr ? (
+          <>
+            <h2>ما هو المؤقت القلّاب عبر الإنترنت؟</h2>
+            <p>
+              يعدّ المؤقت تنازلياً من أي مدة تختارها ويصدر تنبيهاً صوتياً واضحاً فور وصول الوقت إلى الصفر،
+              مع بطاقات كبيرة واضحة للساعات والدقائق والثواني.
+            </p>
+            <h2>كيفية استخدام المؤقت</h2>
+            <ul>
+              <li>اختر إحدى المدد الجاهزة من 15 ثانية حتى 60 دقيقة، أو أدخل وقتاً مخصصاً.</li>
+              <li>اضغط على <strong>بدء</strong> (أو مفتاح المسافة Space) للبدء، و<strong>إيقاف مؤقت</strong> للتوقف، و<strong>إعادة ضبط</strong> للعودة للمدة الأصلية.</li>
+            </ul>
+          </>
+        ) : (
+          <>
+            <h2>What Is an Online Split-Flap Timer?</h2>
+            <p>
+              An online timer counts down from any chosen duration and plays a clear sound alert as soon
+              as the clock hits zero. Large mechanical-style cards make remaining hours, minutes, and
+              seconds effortless to read across a room.
+            </p>
 
-        <form
-          className="mt-5 border-t border-line pt-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            applyCustom();
-          }}
-        >
-          <h3 className="label">Custom time</h3>
-          <div className="mt-2.5 grid grid-cols-3 gap-2 sm:max-w-sm">
-            {(
-              [
-                { key: 'hours', label: 'Hours', max: 99 },
-                { key: 'minutes', label: 'Minutes', max: 59 },
-                { key: 'seconds', label: 'Seconds', max: 59 },
-              ] as const
-            ).map((field) => (
-              <label key={field.key} className="grid gap-1">
-                <span className="text-caption text-muted">{field.label}</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={field.max}
-                  inputMode="numeric"
-                  value={custom[field.key]}
-                  onChange={(event) =>
-                    setCustom((current) => ({ ...current, [field.key]: event.target.value }))
-                  }
-                  className="field numeric"
-                />
-              </label>
+            <h2>How to Use the Timer</h2>
+            <ul>
+              <li>Tap one of the sixteen quick-duration chips—from 15 seconds up to 60 minutes.</li>
+              <li>Or type exact hours, minutes, and seconds into the Custom Time boxes.</li>
+              <li>
+                Press <strong>Start</strong> (or hit <strong>Space</strong>) to begin,{' '}
+                <strong>Pause</strong> to hold, and <strong>Reset</strong> to return to your set time.
+              </li>
+            </ul>
+          </>
+        )}
+
+        <div className="link-directory">
+          <h2>{t.allTimers}</h2>
+
+          <h3>{t.seconds}</h3>
+          <div className="chip-row link-chips">
+            {DIR_SECONDS.map((s) => (
+              <button
+                key={`s-${s}`}
+                type="button"
+                onClick={() => handleSelectPreset(s)}
+                className="chip"
+              >
+                {s} {t.seconds}
+              </button>
             ))}
           </div>
-          <button type="submit" className="btn btn-secondary h-10 mt-3 px-4">
-            Set time
-          </button>
-        </form>
-      </section>
 
-      {status === 'finished' ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="times-up-title"
-          className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
-        >
-          <div className="w-full max-w-xs rounded-2xl border border-line bg-panel p-6 text-center shadow-2xl">
-            <h2 id="times-up-title" className="text-title font-semibold text-ink">
-              Time’s up
-            </h2>
-            <p className="mt-1 text-caption text-muted">
-              {formatDuration(durationMs)} completed.
-            </p>
-            <div className="mt-5 flex gap-2">
+          <h3>{t.minutes}</h3>
+          <div className="chip-row link-chips">
+            {DIR_MINUTES.map((m) => (
+              <button
+                key={`m-${m}`}
+                type="button"
+                onClick={() => handleSelectPreset(m * 60)}
+                className="chip"
+              >
+                {m} {t.minutes}
+              </button>
+            ))}
+          </div>
+
+          <h3>{t.hours}</h3>
+          <div className="chip-row link-chips">
+            {DIR_HOURS.map((h) => (
+              <button
+                key={`h-${h}`}
+                type="button"
+                onClick={() => handleSelectPreset(h * 3600)}
+                className="chip"
+              >
+                {h} {t.hours}
+              </button>
+            ))}
+          </div>
+        </div>
+      </article>
+
+      {ringing ? (
+        <div className="modal-overlay" onClick={handleDismissRing}>
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-label={t.timesUp}
+            className="ring-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-icon">
+              <BellRing className="w-[30px] h-[30px]" />
+            </div>
+            <div className="modal-time" dir="ltr">{ringDurationText}</div>
+            <div className="modal-label">{t.timesUp}</div>
+            <div className="modal-actions">
               <button
                 type="button"
-                onClick={() => start(durationMs)}
-                className="btn btn-primary h-10 flex-1"
+                onClick={handleDismissRing}
+                className="btn btn-lg btn-primary btn-block"
               >
-                Restart
+                {t.ok}
               </button>
-              <button type="button" onClick={reset} className="btn btn-secondary h-10 flex-1">
-                OK
+              <button
+                type="button"
+                onClick={handleRestartFromRing}
+                className="btn btn-lg btn-secondary btn-block"
+              >
+                {t.restart}
               </button>
             </div>
           </div>
         </div>
       ) : null}
-
-      <HelpSections blocks={TIMER_HELP} />
-      <RelatedTools heading="More time tools" tools={TOOLS} />
     </>
   );
-}
+};

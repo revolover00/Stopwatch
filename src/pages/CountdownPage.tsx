@@ -1,306 +1,428 @@
-import { useMemo, useState } from 'react';
-import { FlipClock } from '../components/flip/FlipClock';
-import { ClockStage } from '../components/ui/ClockStage';
-import { HelpSections } from '../components/ui/HelpSections';
-import { PageHeading } from '../components/ui/PageHeading';
-import { RelatedTools, type ToolLink } from '../components/ui/RelatedTools';
-import { COUNTDOWN_HELP } from '../content/help';
-import { useLocalStorageState } from '../hooks/useLocalStorageState';
-import { useNow } from '../hooks/useNow';
-import { daysBetween, HOLIDAYS, holidayLabel, nextOccurrence } from '../lib/holidays';
-import { toDayParts } from '../lib/clock';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Calendar, Clock, Sparkles, Sun } from 'lucide-react';
+import { FlipCard } from '../components/FlipCard';
+import type { AppSettings, CountdownEventTarget } from '../types';
+import { readStorage, writeStorage } from '../utils/storage';
+import { getLanguageMeta, getStrings } from '../i18n';
 
-const TOOLS: readonly ToolLink[] = [
-  { to: '/timer/', title: 'Timer', description: 'Count down minutes and seconds.' },
-  { to: '/stopwatch/', title: 'Stopwatch', description: 'Measure elapsed time.' },
-  { to: '/alarm/', title: 'Alarm', description: 'Ringtones at a chosen hour.' },
-  { to: '/', title: 'Flip clock', description: 'The current time on flip cards.' },
-];
-
-interface Target {
-  readonly name: string;
-  /** Unix epoch milliseconds. */
-  readonly at: number;
+interface CountdownPageProps {
+  settings: AppSettings;
+  externalDaysOffset?: number | null;
+  onConsumeExternalDays?: () => void;
 }
 
-const nextNewYear = (): Target => {
+const COUNTDOWN_STORAGE_KEY = 'splitflap_countdown_v2';
+
+function nextOccurrence(month1Based: number, day: number, hour = 0, minute = 0): Date {
   const now = new Date();
-  return { name: 'New Year', at: new Date(now.getFullYear() + 1, 0, 1, 0, 0, 0, 0).getTime() };
-};
+  let candidate = new Date(now.getFullYear(), month1Based - 1, day, hour, minute, 0, 0);
+  if (candidate.getTime() <= now.getTime()) {
+    candidate = new Date(now.getFullYear() + 1, month1Based - 1, day, hour, minute, 0, 0);
+  }
+  return candidate;
+}
 
-const nextHourOfDay = (hour: number): Target => {
-  const now = new Date();
-  const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, 0, 0, 0);
-  if (candidate.getTime() <= now.getTime()) candidate.setDate(candidate.getDate() + 1);
-  return { name: hour === 0 ? 'Midnight' : hour === 12 ? 'Noon' : 'Evening', at: candidate.getTime() };
-};
+function defaultNewYearTarget(): CountdownEventTarget {
+  const nextYear = new Date().getFullYear() + 1;
+  const target = new Date(nextYear, 0, 1, 0, 0, 0, 0);
+  return {
+    name: "New Year's Day",
+    targetISO: target.toISOString(),
+  };
+}
 
-const formatTargetDate = (at: number): string =>
-  new Intl.DateTimeFormat('en-GB', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(at));
+function toDateInputValue(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
-const toDateInput = (at: number): string => {
-  const date = new Date(at);
-  const pad = (value: number): string => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-};
+function toTimeInputValue(d: Date): string {
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+}
 
-const toTimeInput = (at: number): string => {
-  const date = new Date(at);
-  const pad = (value: number): string => String(value).padStart(2, '0');
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
+export const CountdownPage: React.FC<CountdownPageProps> = ({
+  settings,
+  externalDaysOffset,
+  onConsumeExternalDays,
+}) => {
+  const t = getStrings(settings.language);
+  const langMeta = getLanguageMeta(settings.language);
+  const isAr = settings.language === 'ar';
 
-export function CountdownPage() {
-  const [target, setTarget] = useLocalStorageState<Target>('flipdeck.countdown', nextNewYear());
-  const [name, setName] = useState(target.name);
-  const [dateValue, setDateValue] = useState(() => toDateInput(target.at));
-  const [timeValue, setTimeValue] = useState(() => toTimeInput(target.at));
+  const [target, setTarget] = useState<CountdownEventTarget>(() =>
+    readStorage<CountdownEventTarget>(COUNTDOWN_STORAGE_KEY, defaultNewYearTarget())
+  );
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [activePresetLabel, setActivePresetLabel] = useState<string>('New Year');
 
-  const now = useNow(1000);
-  const remaining = Math.max(0, target.at - now.getTime());
-  const parts = toDayParts(remaining);
-
-  const holidays = useMemo(
-    () =>
-      HOLIDAYS.map((holiday) => {
-        const when = nextOccurrence(holiday, now);
-        return {
-          key: holiday.name,
-          name: holiday.name,
-          label: holidayLabel(holiday, when.getFullYear()),
-          days: daysBetween(when, now),
-          at: when.getTime(),
-        };
-      }).sort((a, b) => a.days - b.days),
-    [now],
+  const initialDate = useMemo(() => new Date(target.targetISO), [target.targetISO]);
+  const [dateVal, setDateVal] = useState<string>(() => toDateInputValue(initialDate));
+  const [timeVal, setTimeVal] = useState<string>(() => toTimeInputValue(initialDate));
+  const [nameVal, setNameVal] = useState<string>(() =>
+    target.name === "New Year's Day" ? '' : target.name
   );
 
-  const applyTarget = (next: Target): void => {
+  useEffect(() => {
+    writeStorage(COUNTDOWN_STORAGE_KEY, target);
+  }, [target]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (externalDaysOffset && externalDaysOffset > 0) {
+      const d = new Date();
+      d.setDate(d.getDate() + externalDaysOffset);
+      d.setHours(0, 0, 0, 0);
+      const next: CountdownEventTarget = {
+        name: `${externalDaysOffset} Days From Today`,
+        targetISO: d.toISOString(),
+      };
+      setTarget(next);
+      setDateVal(toDateInputValue(d));
+      setTimeVal(toTimeInputValue(d));
+      setNameVal(next.name);
+      setActivePresetLabel('');
+      onConsumeExternalDays?.();
+    }
+  }, [externalDaysOffset, onConsumeExternalDays]);
+
+  const applyNewTarget = (d: Date, label: string, presetKey = '') => {
+    const next: CountdownEventTarget = {
+      name: label.trim() || 'Countdown Event',
+      targetISO: d.toISOString(),
+    };
     setTarget(next);
-    setName(next.name);
-    setDateValue(toDateInput(next.at));
-    setTimeValue(toTimeInput(next.at));
+    setDateVal(toDateInputValue(d));
+    setTimeVal(toTimeInputValue(d));
+    setNameVal(label);
+    setActivePresetLabel(presetKey);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>): void => {
-    event.preventDefault();
-    if (!dateValue) return;
-    const [hours = '0', minutes = '0'] = timeValue.split(':');
-    const [year = '0', month = '1', day = '1'] = dateValue.split('-');
-    const parsed = new Date(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      Number(hours),
-      Number(minutes),
-      0,
-      0,
-    );
-    if (Number.isNaN(parsed.getTime())) return;
-    applyTarget({ name: name.trim() || 'Countdown', at: parsed.getTime() });
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const [yy, mm, dd] = dateVal.split('-').map(Number);
+    const [hh, min] = timeVal.split(':').map(Number);
+    if (!yy || !mm || !dd) return;
+    const d = new Date(yy, mm - 1, dd, hh || 0, min || 0, 0, 0);
+    applyNewTarget(d, nameVal || 'Custom Countdown');
   };
+
+  const targetDate = new Date(target.targetISO);
+  const diffSec = Math.max(0, Math.floor((targetDate.getTime() - nowMs) / 1000));
+  const daysNum = Math.floor(diffSec / 86400);
+  const hoursNum = Math.floor((diffSec % 86400) / 3600);
+  const minsNum = Math.floor((diffSec % 3600) / 60);
+  const secsNum = diffSec % 60;
+
+  const daysStr = daysNum > 99 ? String(daysNum) : String(daysNum).padStart(2, '0');
+  const hoursStr = String(hoursNum).padStart(2, '0');
+  const minsStr = String(minsNum).padStart(2, '0');
+  const secsStr = String(secsNum).padStart(2, '0');
+
+  const isMidnight = targetDate.getHours() === 0 && targetDate.getMinutes() === 0;
+  const formattedSubtitle = isMidnight
+    ? `${t.untilPrefix} ${new Intl.DateTimeFormat(`${langMeta.bcp47}-u-nu-latn`, {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      }).format(targetDate)}`
+    : `${t.untilPrefix} ${new Intl.DateTimeFormat(`${langMeta.bcp47}-u-nu-latn`, {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: !settings.use24Hour,
+      }).format(targetDate)}`;
+
+  const presetCategories = useMemo(() => {
+    const now = new Date();
+    const tonightMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
+    const nextNoon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
+    if (nextNoon <= now) nextNoon.setDate(nextNoon.getDate() + 1);
+    const nextEvening = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 18, 0, 0);
+    if (nextEvening <= now) nextEvening.setDate(nextEvening.getDate() + 1);
+
+    return [
+      {
+        title: t.todayGroup,
+        icon: Sun,
+        items: [
+          { label: isAr ? 'منتصف الليل' : 'Midnight', title: isAr ? 'منتصف الليل' : 'Midnight', getDate: () => tonightMidnight },
+          { label: isAr ? 'الظهيرة' : 'Noon', title: isAr ? 'الظهيرة' : 'Noon', getDate: () => nextNoon },
+          { label: isAr ? 'المساء' : 'Evening', title: isAr ? 'هذا المساء' : 'This Evening', getDate: () => nextEvening },
+        ],
+      },
+      {
+        title: t.holidaysGroup,
+        icon: Sparkles,
+        items: [
+          { label: isAr ? 'الكريسماس' : 'Christmas', title: isAr ? 'يوم الميلاد' : 'Christmas Day', getDate: () => nextOccurrence(12, 25) },
+          {
+            label: isAr ? 'رأس السنة' : 'New Year',
+            title: isAr ? 'رأس السنة الجديدة' : "New Year's Day",
+            getDate: () => new Date(new Date().getFullYear() + 1, 0, 1, 0, 0, 0),
+          },
+          { label: isAr ? 'يوم الحب' : "Valentine's", title: isAr ? 'يوم الحب' : "Valentine's Day", getDate: () => nextOccurrence(2, 14) },
+          { label: isAr ? 'هالوين' : 'Halloween', title: isAr ? 'هالوين' : 'Halloween', getDate: () => nextOccurrence(10, 31) },
+        ],
+      },
+      {
+        title: t.quickCountdownsGroup,
+        icon: Clock,
+        items: [
+          {
+            label: isAr ? '5 دقائق' : '5 Minutes',
+            title: isAr ? 'عد تنازلي 5 دقائق' : '5 Minute Countdown',
+            getDate: () => new Date(Date.now() + 5 * 60000),
+          },
+          {
+            label: isAr ? 'ساعة واحدة' : '1 Hour',
+            title: isAr ? 'عد تنازلي ساعة' : '1 Hour Countdown',
+            getDate: () => new Date(Date.now() + 3600000),
+          },
+          {
+            label: isAr ? 'يوم واحد' : '1 Day',
+            title: isAr ? 'عد تنازلي 24 ساعة' : '24 Hour Countdown',
+            getDate: () => new Date(Date.now() + 86400000),
+          },
+        ],
+      },
+    ];
+  }, [t.todayGroup, t.holidaysGroup, t.quickCountdownsGroup, isAr]);
+
+  const holidayDirectory = useMemo(() => {
+    const raw = [
+      { name: 'Veterans Day', date: nextOccurrence(11, 11) },
+      { name: 'Thanksgiving', date: nextOccurrence(11, 26) },
+      { name: 'First Day of Winter', date: nextOccurrence(12, 21) },
+      { name: 'Christmas Eve', date: nextOccurrence(12, 24) },
+      { name: 'Christmas', date: nextOccurrence(12, 25) },
+      { name: "New Year's Eve", date: nextOccurrence(12, 31) },
+      { name: "New Year's Day", date: nextOccurrence(1, 1) },
+      { name: "Valentine's Day", date: nextOccurrence(2, 14) },
+      { name: 'First Day of Spring', date: nextOccurrence(3, 20) },
+      { name: 'Earth Day', date: nextOccurrence(4, 22) },
+      { name: 'First Day of Summer', date: nextOccurrence(6, 21) },
+      { name: 'First Day of Fall', date: nextOccurrence(9, 23) },
+      { name: 'Halloween', date: nextOccurrence(10, 31) },
+    ];
+    return raw
+      .map((item) => {
+        const dLeft = Math.max(0, Math.ceil((item.date.getTime() - nowMs) / 86400000));
+        return { ...item, daysLeft: dLeft };
+      })
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+  }, [nowMs]);
 
   return (
     <>
-      <PageHeading
-        title="Countdown"
-        lead="Point the clock at a moment in the future and watch the days, hours, minutes and seconds fall away."
-      />
+      <div className="page-content-wrapper">
+        <div id="countdown-page" className="page-container">
+          <div className="countdown-heading">
+            <h2 className="countdown-title">
+              {isAr && target.name === "New Year's Day" ? 'رأس السنة الجديدة' : target.name}
+            </h2>
+            <p className="countdown-target">{formattedSubtitle}</p>
+          </div>
 
-      <div className="mt-6">
-        <ClockStage
-          status={remaining === 0 ? 'finished' : 'running'}
-          statusText={remaining === 0 ? 'Arrived' : 'Counting'}
-          footer={
-            <div className="flex flex-col items-center gap-2 text-center">
-              <p className="text-title font-semibold text-ink">
-                {target.name}{' '}
-                <span className="text-body font-normal text-muted">
-                  {remaining === 0 ? 'has arrived' : 'countdown'}
-                </span>
-              </p>
-              <p className="text-caption text-muted">
-                {remaining === 0 ? 'Time to celebrate — pick a new target below.' : `Until ${formatTargetDate(target.at)}`}
-              </p>
+          <div
+            className="flip-display countdown-display"
+            role="timer"
+            aria-label={`${daysStr} ${t.days} ${hoursStr} ${t.hours} ${minsStr} ${t.minutes} ${secsStr} ${t.seconds}`}
+          >
+            <div className="countdown-unit">
+              <FlipCard
+                value={daysStr}
+                srLabel={`${daysStr} ${t.days}`}
+                className={`days-card ${daysNum > 99 ? 'wide' : ''}`.trim()}
+              />
+              <span className="flip-label">{t.days}</span>
             </div>
-          }
-        >
-          <FlipClock
-            groups={[
-              { value: parts.days, label: 'Days', digits: Math.max(2, String(parts.days).length) },
-              { value: parts.hours, label: 'Hours' },
-              { value: parts.minutes, label: 'Minutes' },
-              { value: parts.seconds, label: 'Seconds' },
-            ]}
-            accessibleText={`${parts.days} days, ${parts.hours} hours, ${parts.minutes} minutes and ${parts.seconds} seconds until ${target.name}`}
-          />
-        </ClockStage>
+
+            <div className="countdown-unit">
+              <FlipCard value={hoursStr} srLabel={`${hoursStr} ${t.hours}`} />
+              <span className="flip-label">{t.hours}</span>
+            </div>
+
+            <div className="countdown-unit">
+              <FlipCard value={minsStr} srLabel={`${minsStr} ${t.minutes}`} />
+              <span className="flip-label">{t.minutes}</span>
+            </div>
+
+            <div className="countdown-unit">
+              <FlipCard value={secsStr} srLabel={`${secsStr} ${t.seconds}`} />
+              <span className="flip-label">{t.seconds}</span>
+            </div>
+          </div>
+
+          <div className="controls hide-in-fullscreen">
+            <a
+              href="#countdown-setup"
+              onClick={(e) => {
+                e.preventDefault();
+                document.getElementById('countdown-setup')?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="btn btn-secondary"
+            >
+              <Calendar className="w-[18px] h-[18px]" />
+              <span>{t.createCountdown}</span>
+            </a>
+          </div>
+        </div>
       </div>
 
-      <section
-        id="countdown-setup"
-        aria-labelledby="setup-heading"
-        className="mt-4 scroll-mt-20 rounded-2xl border border-line bg-panel p-4 sm:p-5"
-      >
-        <h2 id="setup-heading" className="text-small font-semibold text-ink">
-          Create a countdown
-        </h2>
-
-        <form onSubmit={handleSubmit} className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_1.2fr_auto] sm:items-end">
-          <label className="grid gap-1">
-            <span className="text-caption text-muted">Date</span>
-            <input
-              type="date"
-              value={dateValue}
-              onChange={(event) => setDateValue(event.target.value)}
-              className="field"
-              required
-            />
-          </label>
-
-          <label className="grid gap-1">
-            <span className="text-caption text-muted">Time</span>
-            <input
-              type="time"
-              value={timeValue}
-              onChange={(event) => setTimeValue(event.target.value)}
-              className="field"
-            />
-          </label>
-
-          <label className="grid gap-1">
-            <span className="text-caption text-muted">Name</span>
-            <input
-              type="text"
-              value={name}
-              maxLength={40}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="My countdown"
-              className="field"
-            />
-          </label>
-
-          <button type="submit" className="btn btn-primary h-10 px-5">
-            Set countdown
-          </button>
-        </form>
-
-        <div className="mt-5 grid gap-4 border-t border-line pt-4 sm:grid-cols-2">
-          <div>
-            <h3 className="label">Today</h3>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {[
-                { label: 'Midnight', hour: 0 },
-                { label: 'Noon', hour: 12 },
-                { label: 'Evening', hour: 18 },
-              ].map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  onClick={() => applyTarget(nextHourOfDay(preset.hour))}
-                  className="chip hover:border-ink/25"
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
+      {/* Setup & Presets Panel */}
+      <div className="page-panels">
+        <section id="countdown-setup" className="panel" aria-labelledby="countdown-setup-title">
+          <div className="panel-header">
+            <h2 id="countdown-setup-title" className="panel-title">
+              {t.createCountdown}
+            </h2>
           </div>
 
-          <div>
-            <h3 className="label">Quick countdowns</h3>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {[
-                { label: '5 minutes', ms: 5 * 60_000 },
-                { label: '1 hour', ms: 3_600_000 },
-                { label: '1 day', ms: 86_400_000 },
-              ].map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  onClick={() => applyTarget({ name: preset.label, at: Date.now() + preset.ms })}
-                  className="chip hover:border-ink/25"
-                >
-                  {preset.label}
-                </button>
-              ))}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="datetime-row">
+              <div>
+                <label htmlFor="cd-date" className="field-label">
+                  {t.dateLabel}
+                </label>
+                <input
+                  id="cd-date"
+                  type="date"
+                  value={dateVal}
+                  onChange={(e) => setDateVal(e.target.value)}
+                  className="input"
+                />
+              </div>
+              <div>
+                <label htmlFor="cd-time" className="field-label">
+                  {t.timeLabel}
+                </label>
+                <input
+                  id="cd-time"
+                  type="time"
+                  value={timeVal}
+                  onChange={(e) => setTimeVal(e.target.value)}
+                  className="input"
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="sm:col-span-2">
-            <h3 className="label">Popular holidays</h3>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {HOLIDAYS.filter((holiday) =>
-                ['New Year', 'Valentine’s Day', 'Halloween', 'Christmas'].includes(holiday.name),
-              ).map((holiday) => {
-                const when = nextOccurrence(holiday, now);
-                return (
+            <div>
+              <label htmlFor="cd-name" className="field-label">
+                {t.countdownNameLabel}
+              </label>
+              <input
+                id="cd-name"
+                type="text"
+                value={nameVal}
+                onChange={(e) => setNameVal(e.target.value)}
+                placeholder={isAr ? 'مثال: التخرج، السفر، رمضان' : 'e.g. Graduation, Trip, Launch Day'}
+                className="input"
+              />
+            </div>
+
+            <button type="submit" className="btn btn-primary btn-block">
+              {t.setCountdown}
+            </button>
+          </form>
+
+          <span className="section-label">{t.presetCountdowns}</span>
+          <div>
+            {presetCategories.map((cat) => {
+              const Icon = cat.icon;
+              return (
+                <div key={cat.title} className="preset-category">
+                  <div className="preset-category-header">
+                    <Icon className="w-[16px] h-[16px]" style={{ color: 'var(--accent)' }} />
+                    <span>{cat.title}</span>
+                  </div>
+                  <div className="preset-category-grid">
+                    {cat.items.map((item) => (
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={() => applyNewTarget(item.getDate(), item.title, item.label)}
+                        className={`chip ${activePresetLabel === item.label ? 'active' : ''}`.trim()}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+
+      {/* Editorial Guide + Live Holiday Countdowns Table */}
+      <article className="info-article">
+        {isAr ? (
+          <>
+            <h2>ما هي ساعة العد التنازلي للمناسبات؟</h2>
+            <p>
+              يحسب مؤقت العد التنازلي الأيام والساعات والدقائق والثواني المتبقية بدقة حتى أي تاريخ أو مناسبة
+              قادمة، ويحفظ المناسبة المختارة في متصفحك تلقائياً.
+            </p>
+          </>
+        ) : (
+          <>
+            <h2>What Is an Event Countdown Clock?</h2>
+            <p>
+              A countdown clock tracks the exact days, hours, minutes, and seconds left until an
+              upcoming date or milestone. Whether counting down to midnight, an exam, or a seasonal
+              holiday, your target stays saved in your browser.
+            </p>
+          </>
+        )}
+
+        <h2>{t.holidayCountdowns}</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>{t.holidayCol}</th>
+              <th>{t.dateLabel}</th>
+              <th style={{ textAlign: isAr ? 'left' : 'right', paddingInlineEnd: 0 }}>{t.daysLeftCol}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {holidayDirectory.map((h) => (
+              <tr key={h.name}>
+                <td>
                   <button
-                    key={holiday.name}
                     type="button"
-                    onClick={() => applyTarget({ name: holiday.name, at: when.getTime() })}
-                    className="chip hover:border-ink/25"
+                    onClick={() => applyNewTarget(h.date, h.name, h.name)}
+                    style={{ color: 'var(--accent)', fontWeight: 500, textAlign: 'start' }}
                   >
-                    {holiday.name}
+                    {h.name}
                   </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section aria-labelledby="holidays-heading" className="mt-10">
-        <h2 id="holidays-heading" className="text-title font-semibold tracking-tight text-ink">
-          Holiday countdowns
-        </h2>
-        <div className="mt-3 overflow-hidden rounded-2xl border border-line bg-panel">
-          <table className="w-full border-collapse text-left">
-            <caption className="sr-only">Upcoming holidays with the number of days remaining.</caption>
-            <thead>
-              <tr className="border-b border-line text-micro uppercase text-muted">
-                <th scope="col" className="px-4 py-2 font-semibold">
-                  Holiday
-                </th>
-                <th scope="col" className="hidden px-4 py-2 font-semibold sm:table-cell">
-                  Date
-                </th>
-                <th scope="col" className="px-4 py-2 text-right font-semibold">
-                  Days left
-                </th>
+                </td>
+                <td>
+                  {new Intl.DateTimeFormat(`${langMeta.bcp47}-u-nu-latn`, {
+                    weekday: 'long',
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric',
+                  }).format(h.date)}
+                </td>
+                <td className="num">
+                  {h.daysLeft} {t.days}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {holidays.map((holiday) => (
-                <tr key={holiday.key} className="border-b border-line/60 last:border-b-0 hover:bg-raised/50">
-                  <td className="px-4 py-2.5">
-                    <button
-                      type="button"
-                      onClick={() => applyTarget({ name: holiday.name, at: holiday.at })}
-                      className="text-small text-ink underline-offset-4 hover:underline"
-                    >
-                      {holiday.name}
-                    </button>
-                  </td>
-                  <td className="hidden px-4 py-2.5 text-caption text-muted sm:table-cell">{holiday.label}</td>
-                  <td className="numeric px-4 py-2.5 text-right text-small text-muted">
-                    {holiday.days} {holiday.days === 1 ? 'day' : 'days'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <HelpSections blocks={COUNTDOWN_HELP} />
-      <RelatedTools heading="More time tools" tools={TOOLS} />
+            ))}
+          </tbody>
+        </table>
+      </article>
     </>
   );
-}
+};
