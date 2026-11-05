@@ -2,16 +2,26 @@ import React, { useEffect, useState } from 'react';
 import { BellRing, ChevronDown, ChevronUp, Clock, Plus, Repeat, Trash2 } from 'lucide-react';
 import { FlipCard, SecondsFlip } from '../components/FlipCard';
 import type { AlarmItem, AppSettings } from '../types';
-import { playSoundOnce, startAlarmLoop, stopAlarmLoop } from '../utils/soundEngine';
+import { startAlarmLoop, stopAlarmLoop } from '../utils/soundEngine';
 import { readStorage, writeStorage } from '../utils/storage';
 import { getLanguageMeta, getStrings, type UIStrings } from '../i18n';
 
 interface AlarmPageProps {
   settings: AppSettings;
   onShowToast?: (msg: string) => void;
+  alarms?: AlarmItem[];
+  onChangeAlarms?: React.Dispatch<React.SetStateAction<AlarmItem[]>>;
 }
 
-const ALARMS_STORAGE_KEY = 'splitflap_alarms_v2';
+export const ALARMS_STORAGE_KEY = 'splitflap_alarms_v2';
+const ALARM_DRAFT_KEY = 'splitflap_alarm_draft_v2';
+
+interface AlarmDraft {
+  pickHour: number;
+  pickMinute: number;
+  pickLabel: string;
+  pickDays: number[];
+}
 
 const PICKER_DAYS: { dayIndex: number; short: string; name: string }[] = [
   { dayIndex: 0, short: 'S', name: 'Sunday' },
@@ -77,7 +87,7 @@ function summarizeDays(days: number[], t: UIStrings, bcp47: string): string {
     .join('، ');
 }
 
-function formatAlarmDisplay(hour24: number, minute: number, use24Hour: boolean): string {
+export function formatAlarmDisplay(hour24: number, minute: number, use24Hour: boolean): string {
   const mm = String(minute).padStart(2, '0');
   if (use24Hour) {
     return `${String(hour24).padStart(2, '0')}:${mm}`;
@@ -110,30 +120,57 @@ function describeUntil(targetMs: number): string {
   return `Alarm set for ${parts.join(', ')} from now.`;
 }
 
-export const AlarmPage: React.FC<AlarmPageProps> = ({ settings, onShowToast }) => {
+export const AlarmPage: React.FC<AlarmPageProps> = ({
+  settings,
+  onShowToast,
+  alarms: externalAlarms,
+  onChangeAlarms,
+}) => {
   const t = getStrings(settings.language);
   const langMeta = getLanguageMeta(settings.language);
   const isAr = settings.language === 'ar';
 
   const [now, setNow] = useState<Date>(() => new Date());
-  const [alarms, setAlarms] = useState<AlarmItem[]>(() =>
+  const [localAlarms, setLocalAlarms] = useState<AlarmItem[]>(() =>
     readStorage<AlarmItem[]>(ALARMS_STORAGE_KEY, [])
   );
+  const alarms = externalAlarms ?? localAlarms;
+  const setAlarms = onChangeAlarms ?? setLocalAlarms;
 
-  const [pickHour, setPickHour] = useState<number>(() => new Date().getHours());
-  const [pickMinute, setPickMinute] = useState<number>(() => new Date().getMinutes());
-  const [pickLabel, setPickLabel] = useState<string>('');
-  const [pickDays, setPickDays] = useState<number[]>([]);
+  const initialDraft = readStorage<AlarmDraft | null>(ALARM_DRAFT_KEY, null);
+  const [pickHour, setPickHour] = useState<number>(() =>
+    initialDraft ? initialDraft.pickHour : new Date().getHours()
+  );
+  const [pickMinute, setPickMinute] = useState<number>(() =>
+    initialDraft ? initialDraft.pickMinute : new Date().getMinutes()
+  );
+  const [pickLabel, setPickLabel] = useState<string>(() => initialDraft?.pickLabel ?? '');
+  const [pickDays, setPickDays] = useState<number[]>(() =>
+    Array.isArray(initialDraft?.pickDays) ? initialDraft.pickDays : []
+  );
   const [expandedRepeatIds, setExpandedRepeatIds] = useState<Record<string, boolean>>({});
   const [ringingAlarm, setRingingAlarm] = useState<AlarmItem | null>(null);
 
   useEffect(() => {
-    writeStorage(ALARMS_STORAGE_KEY, alarms);
-  }, [alarms]);
+    if (!onChangeAlarms) {
+      writeStorage(ALARMS_STORAGE_KEY, localAlarms);
+    }
+  }, [localAlarms, onChangeAlarms]);
 
   useEffect(() => {
-    return () => stopAlarmLoop();
-  }, []);
+    writeStorage<AlarmDraft>(ALARM_DRAFT_KEY, {
+      pickHour,
+      pickMinute,
+      pickLabel,
+      pickDays,
+    });
+  }, [pickHour, pickMinute, pickLabel, pickDays]);
+
+  useEffect(() => {
+    return () => {
+      if (!onChangeAlarms) stopAlarmLoop();
+    };
+  }, [onChangeAlarms]);
 
   useEffect(() => {
     let timerId: number;
@@ -141,54 +178,55 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({ settings, onShowToast }) =
       const current = new Date();
       setNow(current);
 
-      const h = current.getHours();
-      const m = current.getMinutes();
-      const dow = current.getDay();
-      const key = `${current.getFullYear()}-${current.getMonth()}-${current.getDate()}-${h}-${m}`;
+      // Only run local alarm firing when App.tsx is not managing alarms globally
+      if (!onChangeAlarms) {
+        const h = current.getHours();
+        const m = current.getMinutes();
+        const dow = current.getDay();
+        const key = `${current.getFullYear()}-${current.getMonth()}-${current.getDate()}-${h}-${m}`;
 
-      setAlarms((prev) => {
-        let fired: AlarmItem | null = null;
-        let changed = false;
+        setLocalAlarms((prev) => {
+          let fired: AlarmItem | null = null;
+          let changed = false;
 
-        const updated = prev.map((al) => {
-          // Check snoozed wake-up
-          if (!fired && al.snoozeUntil && current.getTime() >= al.snoozeUntil) {
-            fired = al;
-            changed = true;
-            return { ...al, snoozeUntil: undefined };
-          }
-          // Check scheduled wake-up
-          if (!fired && al.enabled) {
-            const matchesDay = al.days.length === 0 || al.days.includes(dow);
-            if (matchesDay && al.hour24 === h && al.minute === m && al.lastTriggeredKey !== key) {
+          const updated = prev.map((al) => {
+            if (!fired && al.snoozeUntil && current.getTime() >= al.snoozeUntil) {
               fired = al;
               changed = true;
-              return { ...al, lastTriggeredKey: key };
+              return { ...al, snoozeUntil: undefined };
             }
-          }
-          return al;
-        });
+            if (!fired && al.enabled) {
+              const matchesDay = al.days.length === 0 || al.days.includes(dow);
+              if (matchesDay && al.hour24 === h && al.minute === m && al.lastTriggeredKey !== key) {
+                fired = al;
+                changed = true;
+                return { ...al, lastTriggeredKey: key };
+              }
+            }
+            return al;
+          });
 
-        if (fired) {
-          const targetAlarm = fired;
-          window.setTimeout(() => {
-            setRingingAlarm(targetAlarm);
-            if (settings.soundEnabled) {
-              startAlarmLoop(settings.soundProfile, settings.volume, settings.gradualVolume);
-            } else {
-              playSoundOnce(settings.soundProfile, settings.volume);
-            }
-          }, 0);
-        }
-        return changed ? updated : prev;
-      });
+          if (fired) {
+            const targetAlarm = fired;
+            window.setTimeout(() => {
+              setRingingAlarm(targetAlarm);
+              startAlarmLoop(
+                settings.soundProfile,
+                Math.max(10, settings.volume),
+                settings.gradualVolume
+              );
+            }, 0);
+          }
+          return changed ? updated : prev;
+        });
+      }
 
       timerId = window.setTimeout(tick, 1000 - (Date.now() % 1000) + 5);
     };
 
     timerId = window.setTimeout(tick, 1000 - (Date.now() % 1000) + 5);
     return () => window.clearTimeout(timerId);
-  }, [settings]);
+  }, [settings, onChangeAlarms]);
 
   const toggleNewDay = (d: number) => {
     setPickDays((prev) =>

@@ -17,7 +17,11 @@ import {
 } from 'lucide-react';
 import { FlipCard, FlipColon } from '../components/FlipCard';
 import type { AppSettings, StudySessionRecord, StudyTask } from '../types';
-import { playFocusTick, playSoundOnce } from '../utils/soundEngine';
+import {
+  playFocusTick,
+  playSoundOnce,
+  sendDesktopNotification,
+} from '../utils/soundEngine';
 import { readStorage, writeStorage } from '../utils/storage';
 import { getLanguageMeta, getStrings } from '../i18n';
 
@@ -31,7 +35,18 @@ type StatsRange = '7' | '30' | 'year';
 
 const TASKS_STORAGE_KEY = 'splitflap_study_tasks_v2';
 const HISTORY_STORAGE_KEY = 'splitflap_study_history_v2';
+const STUDY_STATE_KEY = 'splitflap_study_state_v2';
 const MAX_ESTIMATE = 10;
+
+interface PersistedStudyState {
+  mode: SessionMode;
+  durationSec: number;
+  remainingMs: number;
+  endAt: number;
+  running: boolean;
+  cycleCompleted: number;
+  activeTaskId: string | null;
+}
 
 function todayKey(d = new Date()): string {
   const y = d.getFullYear();
@@ -52,15 +67,90 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
   const langMeta = getLanguageMeta(settings.language);
   const isAr = settings.language === 'ar';
 
-  const [mode, setMode] = useState<SessionMode>('work');
-  const [secondsLeft, setSecondsLeft] = useState<number>(settings.studyWorkMin * 60);
-  const [running, setRunning] = useState<boolean>(false);
-  const [cycleCompleted, setCycleCompleted] = useState<number>(0);
+  const durationForMode = useCallback(
+    (m: SessionMode) => {
+      if (m === 'work') return settings.studyWorkMin * 60;
+      if (m === 'shortBreak') return settings.studyShortBreakMin * 60;
+      return settings.studyLongBreakMin * 60;
+    },
+    [settings.studyWorkMin, settings.studyShortBreakMin, settings.studyLongBreakMin]
+  );
+
+  const initialStudy = useMemo(() => {
+    const defaultDur = settings.studyWorkMin * 60;
+    const saved = readStorage<PersistedStudyState | null>(STUDY_STATE_KEY, null);
+    if (!saved) {
+      return {
+        mode: 'work' as SessionMode,
+        secondsLeft: defaultDur,
+        remainingMs: defaultDur * 1000,
+        endAt: 0,
+        running: false,
+        cycleCompleted: 0,
+        activeTaskId: null as string | null,
+        expiredWhileAway: false,
+      };
+    }
+    const m: SessionMode =
+      saved.mode === 'shortBreak' || saved.mode === 'longBreak' ? saved.mode : 'work';
+    const modeDur =
+      m === 'work'
+        ? settings.studyWorkMin * 60
+        : m === 'shortBreak'
+        ? settings.studyShortBreakMin * 60
+        : settings.studyLongBreakMin * 60;
+
+    if (saved.running && saved.endAt > 0) {
+      const leftMs = saved.endAt - Date.now();
+      if (leftMs > 0) {
+        return {
+          mode: m,
+          secondsLeft: Math.max(1, Math.ceil(leftMs / 1000)),
+          remainingMs: leftMs,
+          endAt: saved.endAt,
+          running: true,
+          cycleCompleted: Math.max(0, Number(saved.cycleCompleted) || 0),
+          activeTaskId: saved.activeTaskId ?? null,
+          expiredWhileAway: false,
+        };
+      }
+      return {
+        mode: m,
+        secondsLeft: 0,
+        remainingMs: 0,
+        endAt: 0,
+        running: false,
+        cycleCompleted: Math.max(0, Number(saved.cycleCompleted) || 0),
+        activeTaskId: saved.activeTaskId ?? null,
+        expiredWhileAway: true,
+      };
+    }
+
+    const remMs =
+      typeof saved.remainingMs === 'number' && saved.remainingMs > 0
+        ? Math.min(modeDur * 1000, saved.remainingMs)
+        : modeDur * 1000;
+    return {
+      mode: m,
+      secondsLeft: Math.max(1, Math.ceil(remMs / 1000)),
+      remainingMs: remMs,
+      endAt: 0,
+      running: false,
+      cycleCompleted: Math.max(0, Number(saved.cycleCompleted) || 0),
+      activeTaskId: saved.activeTaskId ?? null,
+      expiredWhileAway: false,
+    };
+  }, [settings.studyWorkMin, settings.studyShortBreakMin, settings.studyLongBreakMin]);
+
+  const [mode, setMode] = useState<SessionMode>(initialStudy.mode);
+  const [secondsLeft, setSecondsLeft] = useState<number>(initialStudy.secondsLeft);
+  const [running, setRunning] = useState<boolean>(initialStudy.running);
+  const [cycleCompleted, setCycleCompleted] = useState<number>(initialStudy.cycleCompleted);
 
   const [tasks, setTasks] = useState<StudyTask[]>(() =>
     readStorage<StudyTask[]>(TASKS_STORAGE_KEY, [])
   );
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(initialStudy.activeTaskId);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskEst, setNewTaskEst] = useState(1);
 
@@ -73,6 +163,37 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
 
   const runningRef = useRef(running);
   runningRef.current = running;
+  const endAtRef = useRef<number>(initialStudy.endAt);
+  const remainingMsRef = useRef<number>(initialStudy.remainingMs);
+  const lastTickSecRef = useRef<number>(initialStudy.secondsLeft);
+  const prevDurationsRef = useRef({
+    work: settings.studyWorkMin,
+    shortBreak: settings.studyShortBreakMin,
+    longBreak: settings.studyLongBreakMin,
+  });
+
+  const persistStudyState = useCallback(
+    (
+      nextMode: SessionMode,
+      nextDurSec: number,
+      nextRemMs: number,
+      nextEndAt: number,
+      nextRunning: boolean,
+      nextCompleted: number,
+      nextActiveTask: string | null
+    ) => {
+      writeStorage<PersistedStudyState>(STUDY_STATE_KEY, {
+        mode: nextMode,
+        durationSec: nextDurSec,
+        remainingMs: Math.max(0, nextRemMs),
+        endAt: nextEndAt,
+        running: nextRunning,
+        cycleCompleted: nextCompleted,
+        activeTaskId: nextActiveTask,
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     writeStorage(TASKS_STORAGE_KEY, tasks);
@@ -82,6 +203,19 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
     writeStorage(HISTORY_STORAGE_KEY, history);
   }, [history]);
 
+  // Persist activeTaskId updates immediately
+  useEffect(() => {
+    persistStudyState(
+      mode,
+      durationForMode(mode),
+      runningRef.current ? Math.max(0, endAtRef.current - Date.now()) : remainingMsRef.current,
+      endAtRef.current,
+      runningRef.current,
+      cycleCompleted,
+      activeTaskId
+    );
+  }, [activeTaskId, mode, cycleCompleted, durationForMode, persistStudyState]);
+
   // Sync body[data-session] so Work=Red (#ff453a), ShortBreak=Green (#30d158), LongBreak=Blue (#64d2ff)
   useEffect(() => {
     document.body.dataset.session = mode;
@@ -90,32 +224,47 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
     };
   }, [mode]);
 
-  const durationForMode = useCallback(
-    (m: SessionMode) => {
-      if (m === 'work') return settings.studyWorkMin * 60;
-      if (m === 'shortBreak') return settings.studyShortBreakMin * 60;
-      return settings.studyLongBreakMin * 60;
-    },
-    [settings.studyWorkMin, settings.studyShortBreakMin, settings.studyLongBreakMin]
-  );
-
+  // Only update idle duration when user changes work/shortBreak/longBreak settings in SettingsDrawer
   useEffect(() => {
-    if (!runningRef.current) {
-      setSecondsLeft(durationForMode(mode));
+    const prev = prevDurationsRef.current;
+    const changed =
+      prev.work !== settings.studyWorkMin ||
+      prev.shortBreak !== settings.studyShortBreakMin ||
+      prev.longBreak !== settings.studyLongBreakMin;
+    prevDurationsRef.current = {
+      work: settings.studyWorkMin,
+      shortBreak: settings.studyShortBreakMin,
+      longBreak: settings.studyLongBreakMin,
+    };
+    if (changed && !runningRef.current) {
+      const nextSec = durationForMode(mode);
+      remainingMsRef.current = nextSec * 1000;
+      endAtRef.current = 0;
+      setSecondsLeft(nextSec);
+      persistStudyState(mode, nextSec, nextSec * 1000, 0, false, cycleCompleted, activeTaskId);
     }
-  }, [mode, durationForMode]);
+  }, [
+    settings.studyWorkMin,
+    settings.studyShortBreakMin,
+    settings.studyLongBreakMin,
+    mode,
+    durationForMode,
+    cycleCompleted,
+    activeTaskId,
+    persistStudyState,
+  ]);
 
   const advanceSession = useCallback(
-    (wasCompletedWork: boolean) => {
-      if (wasCompletedWork && settings.soundEnabled) {
+    (wasCompletedNaturally: boolean) => {
+      if (wasCompletedNaturally && settings.soundEnabled) {
         playSoundOnce(settings.soundProfile, settings.volume);
       }
 
       if (mode === 'work') {
-        const nextCount = wasCompletedWork ? cycleCompleted + 1 : cycleCompleted;
-        if (wasCompletedWork) {
+        const nextCount = wasCompletedNaturally ? cycleCompleted + 1 : cycleCompleted;
+        if (wasCompletedNaturally) {
           setCycleCompleted(nextCount);
-          const activeTask = tasks.find((t) => t.id === activeTaskId);
+          const activeTask = tasks.find((tk) => tk.id === activeTaskId);
           setHistory((prev) => [
             ...prev,
             {
@@ -129,12 +278,12 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
 
           if (activeTaskId) {
             setTasks((prev) =>
-              prev.map((t) => {
-                if (t.id !== activeTaskId) return t;
-                const nextDoneCount = t.completedSessions + 1;
+              prev.map((tk) => {
+                if (tk.id !== activeTaskId) return tk;
+                const nextDoneCount = tk.completedSessions + 1;
                 const autoDone =
-                  settings.studyAutoCheckTask && nextDoneCount >= t.estSessions ? true : t.done;
-                return { ...t, completedSessions: nextDoneCount, done: autoDone };
+                  settings.studyAutoCheckTask && nextDoneCount >= tk.estSessions ? true : tk.done;
+                return { ...tk, completedSessions: nextDoneCount, done: autoDone };
               })
             );
           }
@@ -144,19 +293,60 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
           nextCount > 0 && nextCount % settings.studySessionsBeforeLong === 0
             ? 'longBreak'
             : 'shortBreak';
-        if (wasCompletedWork) {
-          onShowToast?.(nextMode === 'longBreak' ? 'Long Break Time!' : 'Short Break Time!');
+        const nextDur = durationForMode(nextMode);
+        const shouldRun = wasCompletedNaturally ? settings.studyAutoStartBreaks : false;
+        const nextEnd = shouldRun ? Date.now() + nextDur * 1000 : 0;
+
+        if (wasCompletedNaturally) {
+          const msg = nextMode === 'longBreak' ? t.longBreak : t.shortBreak;
+          onShowToast?.(msg);
+          if (settings.studyDesktopNotifications) {
+            sendDesktopNotification(t.headerStudy, msg);
+          }
         }
+
+        endAtRef.current = nextEnd;
+        remainingMsRef.current = nextDur * 1000;
+        lastTickSecRef.current = nextDur;
         setMode(nextMode);
-        setSecondsLeft(durationForMode(nextMode));
-        setRunning(wasCompletedWork ? settings.studyAutoStartBreaks : runningRef.current);
+        setSecondsLeft(nextDur);
+        setRunning(shouldRun);
+        persistStudyState(
+          nextMode,
+          nextDur,
+          nextDur * 1000,
+          nextEnd,
+          shouldRun,
+          nextCount,
+          activeTaskId
+        );
       } else {
-        if (wasCompletedWork) {
-          onShowToast?.('Break Complete!');
+        const nextDur = durationForMode('work');
+        const shouldRun = wasCompletedNaturally ? settings.studyAutoStartWork : false;
+        const nextEnd = shouldRun ? Date.now() + nextDur * 1000 : 0;
+
+        if (wasCompletedNaturally) {
+          onShowToast?.(t.workSession);
+          if (settings.studyDesktopNotifications) {
+            sendDesktopNotification(t.headerStudy, t.workSession);
+          }
         }
+
+        endAtRef.current = nextEnd;
+        remainingMsRef.current = nextDur * 1000;
+        lastTickSecRef.current = nextDur;
         setMode('work');
-        setSecondsLeft(durationForMode('work'));
-        setRunning(wasCompletedWork ? settings.studyAutoStartWork : runningRef.current);
+        setSecondsLeft(nextDur);
+        setRunning(shouldRun);
+        persistStudyState(
+          'work',
+          nextDur,
+          nextDur * 1000,
+          nextEnd,
+          shouldRun,
+          cycleCompleted,
+          activeTaskId
+        );
       }
     },
     [
@@ -167,25 +357,79 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
       settings,
       durationForMode,
       onShowToast,
+      persistStudyState,
+      t.longBreak,
+      t.shortBreak,
+      t.headerStudy,
+      t.workSession,
     ]
   );
 
+  // If a running session expired while the tab was closed, advance once on mount
+  const handledExpiredRef = useRef(false);
+  useEffect(() => {
+    if (initialStudy.expiredWhileAway && !handledExpiredRef.current) {
+      handledExpiredRef.current = true;
+      advanceSession(true);
+    }
+  }, [initialStudy.expiredWhileAway, advanceSession]);
+
+  const toggleStudyRunning = useCallback(() => {
+    const durSec = durationForMode(mode);
+    if (runningRef.current) {
+      const leftMs = Math.max(0, endAtRef.current - Date.now());
+      endAtRef.current = 0;
+      remainingMsRef.current = leftMs;
+      setRunning(false);
+      setSecondsLeft(Math.max(1, Math.ceil(leftMs / 1000)));
+      persistStudyState(mode, durSec, leftMs, 0, false, cycleCompleted, activeTaskId);
+    } else {
+      const baseMs =
+        remainingMsRef.current > 0 ? remainingMsRef.current : durSec * 1000;
+      const nextEnd = Date.now() + baseMs;
+      endAtRef.current = nextEnd;
+      remainingMsRef.current = baseMs;
+      lastTickSecRef.current = Math.ceil(baseMs / 1000);
+      setSecondsLeft(Math.max(1, Math.ceil(baseMs / 1000)));
+      setRunning(true);
+      persistStudyState(mode, durSec, baseMs, nextEnd, true, cycleCompleted, activeTaskId);
+    }
+  }, [mode, durationForMode, cycleCompleted, activeTaskId, persistStudyState]);
+
   useEffect(() => {
     if (!running) return;
-    const id = window.setInterval(() => {
-      setSecondsLeft((prev) => {
-        if (prev <= 1) {
-          window.setTimeout(() => advanceSession(true), 0);
-          return 0;
-        }
+    if (!endAtRef.current) {
+      endAtRef.current = Date.now() + Math.max(1000, secondsLeft * 1000);
+    }
+
+    const checkTick = () => {
+      const leftMs = endAtRef.current - Date.now();
+      if (leftMs <= 0) {
+        advanceSession(true);
+        return;
+      }
+      remainingMsRef.current = leftMs;
+      const nextSec = Math.max(1, Math.ceil(leftMs / 1000));
+      if (nextSec !== lastTickSecRef.current) {
+        lastTickSecRef.current = nextSec;
+        setSecondsLeft(nextSec);
         if (mode === 'work' && settings.studyTickingSound && !document.hidden) {
           playFocusTick(settings.volume);
         }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [running, mode, settings.studyTickingSound, settings.volume, advanceSession]);
+      }
+    };
+
+    checkTick();
+    const id = window.setInterval(checkTick, 200);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') checkTick();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [running, secondsLeft, mode, settings.studyTickingSound, settings.volume, advanceSession]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -194,12 +438,12 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.code === 'Space' && !e.repeat) {
         e.preventDefault();
-        setRunning((r) => !r);
+        toggleStudyRunning();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [statsOpen]);
+  }, [statsOpen, toggleStudyRunning]);
 
   const totalSec = durationForMode(mode);
   const progress = totalSec > 0 ? Math.min(1, Math.max(0, 1 - secondsLeft / totalSec)) : 0;
@@ -207,17 +451,38 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
   const secsStr = String(secondsLeft % 60).padStart(2, '0');
   const isPausedMidSession = !running && secondsLeft < totalSec;
 
+  useEffect(() => {
+    if (running || isPausedMidSession) {
+      document.title = `${minsStr}:${secsStr} · ${t.headerStudy}`;
+    } else {
+      document.title = `${t.headerStudy} — Flip Clock`;
+    }
+    return () => {
+      document.title = 'Flip Clock';
+    };
+  }, [running, isPausedMidSession, minsStr, secsStr, t.headerStudy]);
+
   const handleSelectMode = (next: SessionMode) => {
     if (running) return;
+    const nextSec = durationForMode(next);
+    endAtRef.current = 0;
+    remainingMsRef.current = nextSec * 1000;
+    lastTickSecRef.current = nextSec;
     setMode(next);
-    setSecondsLeft(durationForMode(next));
+    setSecondsLeft(nextSec);
+    persistStudyState(next, nextSec, nextSec * 1000, 0, false, cycleCompleted, activeTaskId);
   };
 
   const handleResetCycle = () => {
+    const workSec = durationForMode('work');
+    endAtRef.current = 0;
+    remainingMsRef.current = workSec * 1000;
+    lastTickSecRef.current = workSec;
     setRunning(false);
     setCycleCompleted(0);
     setMode('work');
-    setSecondsLeft(durationForMode('work'));
+    setSecondsLeft(workSec);
+    persistStudyState('work', workSec, workSec * 1000, 0, false, 0, activeTaskId);
   };
 
   const handleAddTask = (e: React.FormEvent) => {
@@ -526,8 +791,8 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
             </div>
           </div>
 
-          {/* Controls: Reset Icon + Session-Colored Start/Pause Pill + Skip Icon */}
-          <div className="controls hide-in-fullscreen">
+          {/* Controls: Reset Icon + Session-Colored Start/Pause Pill + Skip Icon (remain visible in Fullscreen per aflipclock.com) */}
+          <div className="controls">
             <button
               type="button"
               onClick={handleResetCycle}
@@ -542,7 +807,7 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
             <button
               id="pomodoro-start-pause-btn"
               type="button"
-              onClick={() => setRunning((r) => !r)}
+              onClick={toggleStudyRunning}
               className="btn btn-lg btn-primary"
             >
               {running ? (
