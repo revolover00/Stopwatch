@@ -2,11 +2,21 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Flag, Pause, Play, RotateCcw } from 'lucide-react';
 import { CentisCard, FlipCard, FlipColon } from '../components/FlipCard';
 import type { AppSettings, LapRecord } from '../types';
+import { readStorage, writeStorage } from '../utils/storage';
 import { getStrings } from '../i18n';
 
 interface StopwatchPageProps {
   settings: AppSettings;
 }
+
+interface PersistedStopwatchState {
+  running: boolean;
+  startedAt: number;
+  accumulated: number;
+  laps: LapRecord[];
+}
+
+const STOPWATCH_STATE_KEY = 'splitflap_stopwatch_state_v2';
 
 function formatMs(ms: number): string {
   const totalCentis = Math.floor(ms / 10);
@@ -22,69 +32,110 @@ export const StopwatchPage: React.FC<StopwatchPageProps> = ({ settings }) => {
   const t = getStrings(settings.language);
   const isAr = settings.language === 'ar';
 
-  const [elapsedMs, setElapsedMs] = useState<number>(0);
-  const [running, setRunning] = useState<boolean>(false);
-  const [laps, setLaps] = useState<LapRecord[]>([]);
-  const [lockedTopMargin, setLockedTopMargin] = useState<number | null>(null);
+  const initialSw = useMemo(() => {
+    const saved = readStorage<PersistedStopwatchState>(STOPWATCH_STATE_KEY, {
+      running: false,
+      startedAt: 0,
+      accumulated: 0,
+      laps: [],
+    });
+    const runningNow = Boolean(saved.running && saved.startedAt > 0);
+    const acc = Math.max(0, Number(saved.accumulated) || 0);
+    const started = runningNow ? Number(saved.startedAt) : 0;
+    const currentElapsed = acc + (runningNow ? Math.max(0, Date.now() - started) : 0);
+    return {
+      running: runningNow,
+      startedAt: started,
+      accumulated: acc,
+      laps: Array.isArray(saved.laps) ? saved.laps : [],
+      elapsed: currentElapsed,
+    };
+  }, []);
 
-  const startRef = useRef<number>(0);
-  const accRef = useRef<number>(0);
-  const stageRef = useRef<HTMLDivElement | null>(null);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [elapsedMs, setElapsedMs] = useState<number>(initialSw.elapsed);
+  const [running, setRunning] = useState<boolean>(initialSw.running);
+  const [laps, setLaps] = useState<LapRecord[]>(initialSw.laps);
+
+  const startedAtRef = useRef<number>(initialSw.startedAt);
+  const accRef = useRef<number>(initialSw.accumulated);
+
+  const persistStopwatch = useCallback(
+    (nextRunning: boolean, nextStartedAt: number, nextAcc: number, nextLaps: LapRecord[]) => {
+      writeStorage<PersistedStopwatchState>(STOPWATCH_STATE_KEY, {
+        running: nextRunning,
+        startedAt: nextStartedAt,
+        accumulated: nextAcc,
+        laps: nextLaps,
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     if (!running) return;
-    startRef.current = performance.now();
+    if (!startedAtRef.current) {
+      startedAtRef.current = Date.now();
+    }
     let rafId = 0;
 
     const tick = () => {
-      const now = performance.now();
-      setElapsedMs(accRef.current + (now - startRef.current));
+      setElapsedMs(accRef.current + Math.max(0, Date.now() - startedAtRef.current));
       rafId = window.requestAnimationFrame(tick);
     };
     rafId = window.requestAnimationFrame(tick);
 
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        setElapsedMs(accRef.current + Math.max(0, Date.now() - startedAtRef.current));
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+
     return () => {
       window.cancelAnimationFrame(rafId);
+      document.removeEventListener('visibilitychange', onVis);
     };
   }, [running]);
 
   const handleToggleRun = useCallback(() => {
     if (running) {
-      accRef.current += performance.now() - startRef.current;
+      const now = Date.now();
+      accRef.current += Math.max(0, now - startedAtRef.current);
+      startedAtRef.current = 0;
       setElapsedMs(accRef.current);
       setRunning(false);
+      persistStopwatch(false, 0, accRef.current, laps);
     } else {
+      const now = Date.now();
+      startedAtRef.current = now;
       setRunning(true);
+      persistStopwatch(true, now, accRef.current, laps);
     }
-  }, [running]);
+  }, [running, laps, persistStopwatch]);
 
   const handleLapOrReset = useCallback(() => {
     if (running) {
-      if (laps.length === 0 && stageRef.current && wrapperRef.current) {
-        const wrapperRect = wrapperRef.current.getBoundingClientRect();
-        const stageRect = stageRef.current.getBoundingClientRect();
-        const currentTop = Math.max(0, stageRect.top - wrapperRect.top - 24);
-        setLockedTopMargin(currentTop);
-      }
-      const currentTotal = accRef.current + (performance.now() - startRef.current);
+      const currentTotal = accRef.current + Math.max(0, Date.now() - startedAtRef.current);
       const prevTotal = laps.length > 0 ? laps[0].totalMs : 0;
       const lapDuration = Math.max(0, currentTotal - prevTotal);
-      setLaps((prev) => [
+      const nextLaps: LapRecord[] = [
         {
-          lapNumber: prev.length + 1,
+          lapNumber: laps.length + 1,
           lapMs: lapDuration,
           totalMs: currentTotal,
         },
-        ...prev,
-      ]);
+        ...laps,
+      ];
+      setLaps(nextLaps);
+      persistStopwatch(true, startedAtRef.current, accRef.current, nextLaps);
     } else {
       accRef.current = 0;
+      startedAtRef.current = 0;
       setElapsedMs(0);
       setLaps([]);
-      setLockedTopMargin(null);
+      persistStopwatch(false, 0, 0, []);
     }
-  }, [running, laps]);
+  }, [running, laps, persistStopwatch]);
 
   // Keyboard shortcuts: Space (Start/Pause), L (Lap), R (Reset)
   useEffect(() => {
@@ -113,6 +164,18 @@ export const StopwatchPage: React.FC<StopwatchPageProps> = ({ settings }) => {
   const mins = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
   const hrs = String(Math.floor(totalSec / 3600)).padStart(2, '0');
 
+  useEffect(() => {
+    if (running || elapsedMs > 0) {
+      const prefix = hrs !== '00' ? `${hrs}:${mins}:${secs}` : `${mins}:${secs}`;
+      document.title = `${prefix} · ${t.headerStopwatch}`;
+    } else {
+      document.title = `${t.headerStopwatch} — Flip Clock`;
+    }
+    return () => {
+      document.title = 'Flip Clock';
+    };
+  }, [running, elapsedMs, hrs, mins, secs, t.headerStopwatch]);
+
   const { bestLapNum, worstLapNum } = useMemo(() => {
     if (laps.length < 2) return { bestLapNum: -1, worstLapNum: -1 };
     let best = laps[0];
@@ -126,25 +189,8 @@ export const StopwatchPage: React.FC<StopwatchPageProps> = ({ settings }) => {
 
   return (
     <>
-      <div
-        ref={wrapperRef}
-        className="page-content-wrapper"
-        style={
-          laps.length > 0 && lockedTopMargin !== null
-            ? { justifyContent: 'flex-start' }
-            : undefined
-        }
-      >
-        <div
-          ref={stageRef}
-          id="stopwatch-page"
-          className="page-container"
-          style={
-            laps.length > 0 && lockedTopMargin !== null
-              ? { marginTop: `${lockedTopMargin}px` }
-              : undefined
-          }
-        >
+      <div className="page-content-wrapper stopwatch-stage">
+        <div id="stopwatch-page" className="page-container">
           {/* 3 Main Flip Cards + Colons + Baseline-Aligned Half-Size Centiseconds Card */}
           <div
             className="flip-display stopwatch-display"
@@ -159,8 +205,8 @@ export const StopwatchPage: React.FC<StopwatchPageProps> = ({ settings }) => {
             <CentisCard value={centis} />
           </div>
 
-          {/* Equal Controls: Reset/Lap + Start/Pause/Resume */}
-          <div className="controls equal hide-in-fullscreen">
+          {/* Equal Controls: Reset/Lap + Start/Pause/Resume (remain visible in Fullscreen per aflipclock.com) */}
+          <div className="controls equal">
             <button
               type="button"
               disabled={!running && elapsedMs === 0}
