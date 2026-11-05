@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BellRing, ChevronDown, ChevronUp, Clock, Plus, Repeat, Trash2 } from 'lucide-react';
 import { FlipCard, SecondsFlip } from '../components/FlipCard';
+import { UIDropdown } from '../components/UIDropdown';
 import type { AlarmItem, AppSettings } from '../types';
 import { startAlarmLoop, stopAlarmLoop } from '../utils/soundEngine';
 import { readStorage, writeStorage } from '../utils/storage';
@@ -370,24 +371,22 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
                 >
                   <ChevronUp className="w-[20px] h-[20px]" />
                 </button>
-                <select
+                <UIDropdown<number>
                   id="select-hour"
-                  aria-label={t.hour}
+                  variant="time"
+                  triggerDir="ltr"
+                  ariaLabel={t.hour}
                   value={pickHour}
-                  onChange={(e) => setPickHour(Number(e.target.value))}
-                  className="time-select-control"
-                >
-                  {Array.from({ length: 24 }).map((_, h) => {
-                    const text = settings.use24Hour
+                  onChange={setPickHour}
+                  onWheelStep={(delta) => setPickHour((h) => (h + delta + 24) % 24)}
+                  options={Array.from({ length: 24 }).map((_, h) => ({
+                    value: h,
+                    label: settings.use24Hour
                       ? String(h).padStart(2, '0')
-                      : `${String(h % 12 || 12).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
-                    return (
-                      <option key={h} value={h}>
-                        {text}
-                      </option>
-                    );
-                  })}
-                </select>
+                      : `${String(h % 12 || 12).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`,
+                    dir: 'ltr',
+                  }))}
+                />
                 <button
                   type="button"
                   onClick={() => setPickHour((h) => (h + 23) % 24)}
@@ -412,19 +411,20 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
                 >
                   <ChevronUp className="w-[20px] h-[20px]" />
                 </button>
-                <select
+                <UIDropdown<number>
                   id="select-minute"
-                  aria-label={t.minute}
+                  variant="time"
+                  triggerDir="ltr"
+                  ariaLabel={t.minute}
                   value={pickMinute}
-                  onChange={(e) => setPickMinute(Number(e.target.value))}
-                  className="time-select-control"
-                >
-                  {Array.from({ length: 60 }).map((_, m) => (
-                    <option key={m} value={m}>
-                      {String(m).padStart(2, '0')}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setPickMinute}
+                  onWheelStep={(delta) => setPickMinute((m) => (m + delta + 60) % 60)}
+                  options={Array.from({ length: 60 }).map((_, m) => ({
+                    value: m,
+                    label: String(m).padStart(2, '0'),
+                    dir: 'ltr',
+                  }))}
+                />
                 <button
                   type="button"
                   onClick={() => setPickMinute((m) => (m + 59) % 60)}

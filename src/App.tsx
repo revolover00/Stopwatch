@@ -115,6 +115,21 @@ export const App: React.FC = () => {
     if ((merged.flipStyle as string) === 'professional') {
       merged.flipStyle = 'pro';
     }
+    const validProfiles = [
+      'bell',
+      'piano',
+      'melody',
+      'chime',
+      'sunrise',
+      'harmony',
+      'crystal',
+      'beacon',
+      'digital',
+      'classic',
+    ];
+    if (!validProfiles.includes(merged.soundProfile)) {
+      merged.soundProfile = 'bell';
+    }
     return merged;
   });
 

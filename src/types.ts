@@ -10,12 +10,15 @@ export type LayoutMode = 'auto' | 'horizontal' | 'vertical';
 
 export type SoundProfile =
   | 'bell'
-  | 'classic'
-  | 'beacon'
-  | 'sunrise'
+  | 'piano'
+  | 'melody'
   | 'chime'
+  | 'sunrise'
+  | 'harmony'
+  | 'crystal'
+  | 'beacon'
   | 'digital'
-  | 'melody';
+  | 'classic';
 
 export interface AppSettings {
   language: LangCode;
