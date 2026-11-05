@@ -2702,7 +2702,7 @@ body[data-mode="light"] .pomodoro-face::before {
 /* 3. Timer Page */
 #timer-page {
   --cap: 1.5px;
-  --fit: min((100vw - 44px) / 618, (var(--vh100) - 540px + 2 * (32px - var(--stage-gap))) / 220);
+  --fit: max(0.76px, min((100vw - 44px) / 618, (var(--vh100) - 600px + 2 * (32px - var(--stage-gap))) / 220));
   --card-w: calc(180 * var(--u));
   --card-h: calc(220 * var(--u));
   --card-r: calc(24 * var(--u));
@@ -3173,3 +3173,251 @@ html[dir="rtl"] .task-item.active::before {
     transform: none;
   }
 }
+
+/* ==========================================================================
+   iOS 3D Drum-Roll Timer & Alarm Wheel Picker (@ncdai/react-wheel-picker)
+   ========================================================================== */
+.ios-wheel-card {
+  position: relative;
+  background: var(--surface-2);
+  border-radius: 20px;
+  padding: 6px 14px;
+  box-shadow:
+    inset 0 0 0 1px var(--separator),
+    0 12px 28px -14px rgba(0, 0, 0, 0.38);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.ios-wheel-card.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.duration-wheel-card {
+  width: min(358px, calc(100vw - 36px));
+}
+
+.alarm-wheel-card {
+  width: 100%;
+  max-width: 312px;
+  margin: 0 auto;
+}
+
+.alarm-wheel-card.is-compact {
+  max-width: 100%;
+  background: transparent;
+  box-shadow: none;
+  padding: 2px 4px;
+}
+
+.ios-wheel-wrapper[data-rwp-wrapper] {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  width: 100%;
+  perspective: 2000px;
+}
+
+.ios-wheel-col {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.ios-wheel-col.period-col {
+  flex: 0.82;
+}
+
+.ios-wheel-card [data-rwp] {
+  cursor: grab;
+  touch-action: none;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.55) 18%,
+    #000000 36%,
+    #000000 64%,
+    rgba(0, 0, 0, 0.55) 82%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.55) 18%,
+    #000000 36%,
+    #000000 64%,
+    rgba(0, 0, 0, 0.55) 82%,
+    transparent 100%
+  );
+}
+
+.ios-wheel-card [data-rwp]:active {
+  cursor: grabbing;
+}
+
+.ios-wheel-highlight-slot[data-rwp-highlight-wrapper] {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.ios-wheel-highlight-slot[data-rwp-highlight-wrapper][data-rwp-focused] {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.ios-wheel-highlight-slot.is-left-cap {
+  border-radius: 11px 0 0 11px;
+}
+
+.ios-wheel-highlight-slot.is-right-cap {
+  border-radius: 0 11px 11px 0;
+}
+
+.ios-wheel-option[data-rwp-option] {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  letter-spacing: -0.01em;
+}
+
+.ios-wheel-highlight-item[data-rwp-highlight-item] {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.alarm-wheel-option[data-rwp-option] {
+  font-size: 21px;
+}
+
+.alarm-wheel-highlight[data-rwp-highlight-item] {
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.alarm-wheel-card.is-compact .alarm-wheel-option[data-rwp-option] {
+  font-size: 18px;
+}
+
+.alarm-wheel-card.is-compact .alarm-wheel-highlight[data-rwp-highlight-item] {
+  font-size: 21px;
+}
+
+.period-wheel-option[data-rwp-option] {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.period-wheel-highlight[data-rwp-highlight-item] {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.ios-wheel-unit {
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px 0 2px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+.ios-wheel-unit.is-right-cap {
+  border-radius: 0 11px 11px 0;
+  padding-right: 12px;
+}
+
+.ios-wheel-colon-col {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+.ios-wheel-colon {
+  height: 40px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-3);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.alarm-wheel-card.is-compact .ios-wheel-colon {
+  height: 34px;
+  font-size: 20px;
+}
+
+/* Countdown Time Wheel Popover Trigger & Floating Card */
+.time-wheel-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  text-align: start;
+}
+
+.time-wheel-trigger.is-open {
+  background: var(--fill-strong);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.time-wheel-trigger-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.time-wheel-popover {
+  position: fixed;
+  z-index: 1250;
+  padding: 10px;
+  border-radius: 18px;
+  background: var(--sheet-bg);
+  -webkit-backdrop-filter: saturate(180%) blur(28px);
+  backdrop-filter: saturate(180%) blur(28px);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-border),
+    var(--shadow-lg);
+  animation: wheel-pop-in 0.16s var(--ease-out);
+}
+
+.time-wheel-popover-foot {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--separator);
+}
+
+@keyframes wheel-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
