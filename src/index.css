@@ -1,0 +1,438 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------ */
+/* Themes — every colour in the app resolves through these variables.  */
+/* ------------------------------------------------------------------ */
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+  --c-bg: 15 17 21;
+  --c-panel: 22 24 29;
+  --c-raised: 28 31 37;
+  --c-line: 42 46 54;
+  --c-ink: 238 241 245;
+  --c-muted: 148 154 165;
+  --c-accent: 245 196 81;
+  --c-accent-ink: 26 18 6;
+  --c-danger: 255 122 105;
+  --c-digit: 246 247 249;
+  --c-seam: 8 9 11;
+  --c-card-top-a: 46 50 58;
+  --c-card-top-b: 37 41 48;
+  --c-card-bottom-a: 31 34 40;
+  --c-card-bottom-b: 24 27 32;
+  --ambient: radial-gradient(60rem 34rem at 50% -18%, rgb(245 196 81 / 0.07), transparent 70%);
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --c-bg: 236 239 243;
+  --c-panel: 255 255 255;
+  --c-raised: 246 247 249;
+  --c-line: 216 221 229;
+  --c-ink: 20 22 26;
+  --c-muted: 96 104 116;
+  --c-accent: 31 99 214;
+  --c-accent-ink: 255 255 255;
+  --c-danger: 191 43 32;
+  --c-digit: 20 22 26;
+  --c-seam: 186 192 201;
+  --c-card-top-a: 255 255 255;
+  --c-card-top-b: 247 248 250;
+  --c-card-bottom-a: 233 236 241;
+  --c-card-bottom-b: 224 228 234;
+  --ambient: radial-gradient(60rem 34rem at 50% -18%, rgb(31 99 214 / 0.07), transparent 70%);
+}
+
+[data-theme='midnight'] {
+  color-scheme: dark;
+  --c-bg: 5 10 28;
+  --c-panel: 11 20 48;
+  --c-raised: 16 27 62;
+  --c-line: 30 45 92;
+  --c-ink: 223 231 255;
+  --c-muted: 138 152 190;
+  --c-accent: 124 156 255;
+  --c-accent-ink: 8 18 46;
+  --c-danger: 255 138 128;
+  --c-digit: 219 230 255;
+  --c-seam: 2 4 15;
+  --c-card-top-a: 31 49 99;
+  --c-card-top-b: 22 36 76;
+  --c-card-bottom-a: 16 26 60;
+  --c-card-bottom-b: 11 19 48;
+  --ambient: radial-gradient(60rem 34rem at 50% -18%, rgb(124 156 255 / 0.12), transparent 70%);
+}
+
+[data-theme='sand'] {
+  color-scheme: light;
+  --c-bg: 238 227 211;
+  --c-panel: 251 246 237;
+  --c-raised: 245 238 226;
+  --c-line: 216 202 181;
+  --c-ink: 64 48 31;
+  --c-muted: 130 111 88;
+  --c-accent: 154 91 44;
+  --c-accent-ink: 255 248 238;
+  --c-danger: 168 58 40;
+  --c-digit: 64 48 31;
+  --c-seam: 199 183 156;
+  --c-card-top-a: 253 250 244;
+  --c-card-top-b: 246 239 226;
+  --c-card-bottom-a: 236 224 205;
+  --c-card-bottom-b: 227 212 189;
+  --ambient: radial-gradient(60rem 34rem at 50% -18%, rgb(154 91 44 / 0.08), transparent 70%);
+}
+
+/* ------------------------------------------------------------------ */
+/* Base                                                                */
+/* ------------------------------------------------------------------ */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    @apply bg-bg font-sans text-ink antialiased;
+    background-image: var(--ambient);
+    background-repeat: no-repeat;
+    min-height: 100vh;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-bg;
+  }
+
+  ::selection {
+    background: rgb(var(--c-accent) / 0.28);
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+}
+
+@layer components {
+  .numeric {
+    font-family: theme('fontFamily.mono');
+    font-variant-numeric: tabular-nums;
+  }
+
+  .label {
+    @apply text-micro font-semibold uppercase text-muted;
+  }
+
+  .kbd {
+    @apply inline-flex min-w-6 items-center justify-center rounded-md border border-line bg-raised px-1.5 py-1 font-mono text-caption font-medium text-ink;
+  }
+
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl px-4 text-small font-semibold transition duration-150 active:translate-y-px disabled:pointer-events-none disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply bg-accent text-accent-ink hover:brightness-105;
+    box-shadow: 0 10px 24px -16px rgb(var(--c-accent) / 0.9);
+  }
+
+  .btn-secondary {
+    @apply border border-line bg-panel text-ink hover:border-ink/30 hover:bg-raised;
+  }
+
+  .btn-ghost {
+    @apply text-muted hover:bg-raised hover:text-ink;
+  }
+
+  .btn-sm {
+    @apply h-8 rounded-lg px-2.5 text-caption;
+  }
+
+  .panel {
+    @apply rounded-2xl border border-line bg-panel;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-pill border border-line bg-raised px-3 py-1.5 text-caption font-medium text-ink transition-colors;
+  }
+
+  .chip-active {
+    @apply border-accent/60 bg-accent/15 text-ink;
+  }
+
+  .field {
+    @apply h-10 w-full rounded-lg border border-line bg-panel px-3 text-small text-ink placeholder:text-muted/70 focus:border-accent/70;
+  }
+
+  .prose-copy p {
+    @apply text-body leading-relaxed text-muted;
+  }
+
+  .prose-copy li {
+    @apply text-body leading-relaxed text-muted;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Flip display                                                        */
+/* ------------------------------------------------------------------ */
+.flip-clock {
+  --size: 1;
+  --card-gap: clamp(0.35rem, 0.9vw, 0.6rem);
+  --group-gap: clamp(0.85rem, 2.2vw, 1.75rem);
+  --radius: 0.7rem;
+  --digit-weight: 700;
+  --digit-font: theme('fontFamily.sans');
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--group-gap);
+  width: 100%;
+}
+
+.flip-style-standard {
+  --radius: 0.7rem;
+}
+
+.flip-style-simple {
+  --radius: 0.15rem;
+}
+
+.flip-style-professional {
+  --radius: 0.55rem;
+  --digit-weight: 500;
+  --digit-font: theme('fontFamily.mono');
+}
+
+.flip-group {
+  display: grid;
+  grid-template-columns: repeat(var(--digits, 2), minmax(0, 1fr));
+  gap: var(--card-gap);
+  min-width: 0;
+}
+
+.flip-clock-labels .flip-label {
+  grid-column: 1 / -1;
+  margin-top: 0.55rem;
+  text-align: center;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgb(var(--c-muted));
+}
+
+/* Horizontal: groups share the row, each sized by its digit count. */
+.flip-clock[data-layout='horizontal'] .flip-group,
+.flip-clock[data-layout='auto'] .flip-group {
+  flex: var(--digits, 2) 1 0;
+  max-width: calc(9rem * var(--digits, 2) * var(--size));
+}
+
+.flip-clock[data-layout='horizontal'] {
+  flex-wrap: nowrap;
+}
+
+/* Vertical: one group per row, stacked and centred. */
+.flip-clock[data-layout='vertical'],
+.flip-clock[data-layout='auto'] {
+  flex-direction: column;
+  align-items: center;
+}
+
+.flip-clock[data-layout='vertical'] .flip-group,
+.flip-clock[data-layout='auto'] .flip-group {
+  width: calc(min(58vw, 15rem) * var(--size));
+  max-width: none;
+}
+
+@media (min-width: 768px) {
+  .flip-clock[data-layout='auto'] {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+  }
+
+  .flip-clock[data-layout='auto'] .flip-group {
+    width: auto;
+    max-width: calc(9rem * var(--digits, 2) * var(--size));
+  }
+}
+
+.flip-card {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 0.68;
+  container-type: inline-size;
+  perspective: 900px;
+  border-radius: var(--radius);
+  background: rgb(var(--c-card-bottom-b));
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.04) inset,
+    0 14px 28px -22px rgb(0 0 0 / 0.9);
+}
+
+.flip-half,
+.flip-leaf {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 50%;
+  overflow: hidden;
+}
+
+.flip-half > span,
+.flip-leaf > span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 200%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--digit-font);
+  font-size: 122cqi;
+  font-weight: var(--digit-weight);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: rgb(var(--c-digit));
+  font-variant-numeric: tabular-nums;
+}
+
+.flip-half--top,
+.flip-leaf--top {
+  top: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: linear-gradient(180deg, rgb(var(--c-card-top-a)), rgb(var(--c-card-top-b)));
+}
+
+.flip-half--top > span,
+.flip-leaf--top > span {
+  top: 0;
+}
+
+.flip-half--bottom,
+.flip-leaf--bottom {
+  bottom: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: linear-gradient(180deg, rgb(var(--c-card-bottom-a)), rgb(var(--c-card-bottom-b)));
+}
+
+.flip-half--bottom > span,
+.flip-leaf--bottom > span {
+  top: -100%;
+}
+
+.flip-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius);
+  border: 1px solid rgb(var(--c-ink) / 0.06);
+  pointer-events: none;
+}
+
+.flip-seam {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  transform: translateY(-1px);
+  background: rgb(var(--c-seam) / 0.85);
+  pointer-events: none;
+}
+
+.flip-style-simple .flip-seam {
+  height: 1px;
+  background: rgb(var(--c-line) / 0.9);
+}
+
+.flip-style-professional .flip-card {
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.05) inset,
+    0 0 0 1px rgb(var(--c-line) / 0.9),
+    0 18px 36px -26px rgb(0 0 0 / 0.95);
+}
+
+.flip-leaf--top {
+  transform-origin: bottom center;
+  animation: flip-down 320ms cubic-bezier(0.4, 0, 0.6, 1) both;
+  backface-visibility: hidden;
+}
+
+.flip-leaf--bottom {
+  transform-origin: top center;
+  transform: rotateX(90deg);
+  animation: flip-up 320ms 320ms cubic-bezier(0.3, 0, 0.5, 1) both;
+  backface-visibility: hidden;
+}
+
+.flip-leaf--top::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 0.22);
+  animation: leaf-shade 320ms ease-out both;
+}
+
+.flip-leaf--bottom::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 0.22);
+  animation: leaf-shade 320ms 320ms ease-in reverse both;
+}
+
+@keyframes flip-down {
+  from {
+    transform: rotateX(0deg);
+  }
+  to {
+    transform: rotateX(-90deg);
+  }
+}
+
+@keyframes flip-up {
+  from {
+    transform: rotateX(90deg);
+  }
+  to {
+    transform: rotateX(0deg);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes leaf-shade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flip-leaf--top,
+  .flip-leaf--bottom,
+  .flip-leaf--top::before,
+  .flip-leaf--bottom::before {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+  }
+}
