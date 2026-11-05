@@ -62,12 +62,13 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
     alarm: t.headerAlarm,
   };
 
-  const dockItems: { route: RouteKey; label: string; icon: React.ReactNode }[] = [
+  const dockItems: { route: RouteKey; hash: string; label: string; icon: React.ReactNode }[] = [
     {
       route: 'clock',
+      hash: '#/',
       label: t.dockClock,
       icon: (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="9" />
           <path d="M12 7v5l3.2 2" />
         </svg>
@@ -75,9 +76,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
     },
     {
       route: 'study',
+      hash: '#/study-timer',
       label: t.dockStudy,
       icon: (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
           <path d="M2 7.5L12 3l10 4.5-10 4.5L2 7.5z" />
           <path d="M6 9.5v5c0 1.8 2.7 3.5 6 3.5s6-1.7 6-3.5v-5" />
           <path d="M22 7.5v6" />
@@ -86,9 +88,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
     },
     {
       route: 'timer',
+      hash: '#/timer',
       label: t.dockTimer,
       icon: (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
           <path d="M6 2h12" />
           <path d="M6 22h12" />
           <path d="M7 2v4.5c0 2.2 2 3.8 5 5.5 3-1.7 5-3.3 5-5.5V2" />
@@ -98,9 +101,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
     },
     {
       route: 'stopwatch',
+      hash: '#/stopwatch',
       label: t.dockStopwatch,
       icon: (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
           <path d="M10 2h4" />
           <path d="M12 2v3" />
           <path d="M18.5 6.5l1.5-1.5" />
@@ -111,9 +115,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
     },
     {
       route: 'countdown',
+      hash: '#/countdown',
       label: t.dockCountdown,
       icon: (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
           <rect x="3" y="4" width="18" height="17" rx="3" />
           <path d="M8 2v4" />
           <path d="M16 2v4" />
@@ -124,9 +129,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
     },
     {
       route: 'alarm',
+      hash: '#/alarm',
       label: t.dockAlarm,
       icon: (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="13" r="8" />
           <path d="M12 9v4l2.5 1.5" />
           <path d="M4 5l3-2.5" />
@@ -138,9 +144,9 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
   return (
     <>
-      <header className="app-header">
-        <div className="flex items-center gap-2.5 min-w-0">
-          {worldMode && onToggleWorldMode && (
+      <header className="app-header hide-in-fullscreen">
+        <div className="header-brand">
+          {worldMode && onToggleWorldMode ? (
             <button
               type="button"
               onClick={() => onToggleWorldMode(false)}
@@ -152,6 +158,24 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                 <path d="M15 18l-6-6 6-6" />
               </svg>
             </button>
+          ) : (
+            <a
+              href="#/"
+              className="app-mark"
+              aria-label={t.dockClock}
+              onClick={(e) => {
+                e.preventDefault();
+                if (worldMode && onToggleWorldMode) onToggleWorldMode(false);
+                onSelectRoute('clock');
+              }}
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="2.5" y="4" width="8.5" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
+                <rect x="13" y="4" width="8.5" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
+                <line x1="2.5" y1="12" x2="11" y2="12" stroke="currentColor" strokeWidth="1.6" />
+                <line x1="13" y1="12" x2="21.5" y2="12" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+            </a>
           )}
           <h1>{headerTitles[activeRoute]}</h1>
         </div>
@@ -256,36 +280,35 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
           </button>
         </div>
       </header>
 
-      {/* Bottom Floating App Nav Dock */}
-      <nav className="app-nav-dock" aria-label="Primary">
-        <div className="app-nav-inner">
-          {dockItems.map((item) => {
-            const active = activeRoute === item.route;
-            return (
-              <a
-                key={item.route}
-                href={`#/${item.route === 'clock' ? '' : item.route}`}
-                aria-current={active ? 'page' : undefined}
-                onClick={(e) => {
-                  e.preventDefault();
-                  if (item.route === 'clock' && worldMode && onToggleWorldMode) {
-                    onToggleWorldMode(false);
-                  }
-                  onSelectRoute(item.route);
-                }}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </a>
-            );
-          })}
-        </div>
+      {/* Bottom Floating App Nav Dock (exact .app-nav-dock > .nav-dock-item) */}
+      <nav className="app-nav-dock hide-in-fullscreen" aria-label="Primary">
+        {dockItems.map((item) => {
+          const active = activeRoute === item.route;
+          return (
+            <a
+              key={item.route}
+              href={item.hash}
+              aria-current={active ? 'page' : undefined}
+              className={`nav-dock-item ${active ? 'active' : ''}`.trim()}
+              onClick={(e) => {
+                e.preventDefault();
+                if (item.route === 'clock' && worldMode && onToggleWorldMode) {
+                  onToggleWorldMode(false);
+                }
+                onSelectRoute(item.route);
+              }}
+            >
+              {item.icon}
+              <span className="nav-dock-item-label">{item.label}</span>
+            </a>
+          );
+        })}
       </nav>
     </>
   );
