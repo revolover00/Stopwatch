@@ -139,12 +139,15 @@ export interface UIStrings {
   soundNotification: string;
   selectSound: string;
   soundBell: string;
-  soundClassic: string;
-  soundBeacon: string;
-  soundSunrise: string;
-  soundChime: string;
-  soundDigital: string;
+  soundPiano: string;
   soundMelody: string;
+  soundChime: string;
+  soundSunrise: string;
+  soundHarmony: string;
+  soundCrystal: string;
+  soundBeacon: string;
+  soundDigital: string;
+  soundClassic: string;
   volume: string;
   testSound: string;
   ringUntilStopped: string;
@@ -305,13 +308,16 @@ const EN: UIStrings = {
   alarmSound: 'Alarm Sound',
   soundNotification: 'Sound Notification',
   selectSound: 'Select Sound',
-  soundBell: 'Bell Sound (Default)',
-  soundClassic: 'Classic Alarm',
-  soundBeacon: 'Beacon',
-  soundSunrise: 'Sunrise',
-  soundChime: 'Gentle Chime',
-  soundDigital: 'Digital Beep',
-  soundMelody: 'Short Melody',
+  soundBell: 'Warm Bell',
+  soundPiano: 'Acoustic Piano',
+  soundMelody: 'Piano Melody',
+  soundChime: 'Soft Chime',
+  soundSunrise: 'Morning Sunrise',
+  soundHarmony: 'Warm Harmony',
+  soundCrystal: 'Crystal Harp',
+  soundBeacon: 'Minimal Ringtone',
+  soundDigital: 'Modern Digital',
+  soundClassic: 'Classic Twin Bell',
   volume: 'Volume',
   testSound: 'Test Sound',
   ringUntilStopped: 'Ring Until Stopped',
@@ -469,13 +475,16 @@ const AR: UIStrings = {
   alarmSound: 'صوت المنبّه',
   soundNotification: 'التنبيه الصوتي',
   selectSound: 'اختيار النغمة',
-  soundBell: 'صوت الجرس (افتراضي)',
-  soundClassic: 'منبّه كلاسيكي',
-  soundBeacon: 'إشارة ضوئية',
-  soundSunrise: 'شروق الشمس',
+  soundBell: 'جرس دافئ',
+  soundPiano: 'بيانو أكوستيك',
+  soundMelody: 'لحن البيانو',
   soundChime: 'رنين هادئ',
-  soundDigital: 'صفير رقمي',
-  soundMelody: 'لحن قصير',
+  soundSunrise: 'إشراق الصباح',
+  soundHarmony: 'تناغم دافئ',
+  soundCrystal: 'رنين الكريستال',
+  soundBeacon: 'نغمة هادئة',
+  soundDigital: 'نغمة رقمية حديثة',
+  soundClassic: 'منبّه كلاسيكي',
   volume: 'مستوى الصوت',
   testSound: 'تجربة الصوت',
   ringUntilStopped: 'رنين مستمر حتى الإيقاف',
