@@ -14,6 +14,7 @@ import {
   togglePreviewSound,
 } from '../utils/soundEngine';
 import { getStrings } from '../i18n';
+import { UIDropdown } from './UIDropdown';
 
 interface SettingsDrawerProps {
   open: boolean;
@@ -156,13 +157,24 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
 
   const allSoundOptions: { value: SoundProfile; label: string }[] = [
     { value: 'bell', label: t.soundBell },
-    { value: 'classic', label: t.soundClassic },
-    { value: 'beacon', label: t.soundBeacon },
-    { value: 'sunrise', label: t.soundSunrise },
-    { value: 'chime', label: t.soundChime },
-    { value: 'digital', label: t.soundDigital },
+    { value: 'piano', label: t.soundPiano },
     { value: 'melody', label: t.soundMelody },
+    { value: 'chime', label: t.soundChime },
+    { value: 'sunrise', label: t.soundSunrise },
+    { value: 'harmony', label: t.soundHarmony },
+    { value: 'crystal', label: t.soundCrystal },
+    { value: 'beacon', label: t.soundBeacon },
+    { value: 'digital', label: t.soundDigital },
+    { value: 'classic', label: t.soundClassic },
   ];
+
+  const toneNoteIcon = (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </svg>
+  );
 
   const studySoundOptions = allSoundOptions;
 
@@ -387,18 +399,14 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                   >
                     <div className="settings-row">
                       <span>{t.selectSound}</span>
-                      <select
+                      <UIDropdown<SoundProfile>
                         value={settings.soundProfile}
+                        options={studySoundOptions}
                         disabled={!settings.soundEnabled}
-                        onChange={(e) => handleSelectSound(e.target.value as SoundProfile)}
-                        className="input sound-selector"
-                      >
-                        {studySoundOptions.map((s) => (
-                          <option key={s.value} value={s.value}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
+                        ariaLabel={t.selectSound}
+                        leadingIcon={toneNoteIcon}
+                        onChange={handleSelectSound}
+                      />
                     </div>
                     <div className="settings-row stacked">
                       <div className="settings-row-head">
@@ -505,18 +513,14 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 >
                   <div className="settings-row">
                     <span>{t.selectSound}</span>
-                    <select
+                    <UIDropdown<SoundProfile>
                       value={settings.soundProfile}
+                      options={allSoundOptions}
                       disabled={!settings.soundEnabled}
-                      onChange={(e) => handleSelectSound(e.target.value as SoundProfile)}
-                      className="input sound-selector"
-                    >
-                      {allSoundOptions.map((s) => (
-                        <option key={s.value} value={s.value}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
+                      ariaLabel={t.selectSound}
+                      leadingIcon={toneNoteIcon}
+                      onChange={handleSelectSound}
+                    />
                   </div>
                   <div className="settings-row stacked">
                     <div className="settings-row-head">
@@ -572,17 +576,13 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
               <div className="settings-list">
                 <div className="settings-row">
                   <span>{t.selectSound}</span>
-                  <select
+                  <UIDropdown<SoundProfile>
                     value={settings.soundProfile}
-                    onChange={(e) => handleSelectSound(e.target.value as SoundProfile)}
-                    className="input sound-selector"
-                  >
-                    {allSoundOptions.map((s) => (
-                      <option key={s.value} value={s.value}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={allSoundOptions}
+                    ariaLabel={t.selectSound}
+                    leadingIcon={toneNoteIcon}
+                    onChange={handleSelectSound}
+                  />
                 </div>
                 <div className="settings-row stacked">
                   <div className="settings-row-head">
