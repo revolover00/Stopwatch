@@ -280,6 +280,32 @@ export function playFocusTick(volumePercent: number): void {
   setHowlSoundGain(tickHowl, id, norm * 2.6);
 }
 
+let lastWheelClickAt = 0;
+
+export function playWheelClick(volumePercent = 65, soundEnabled = true): void {
+  const now = performance.now();
+  if (now - lastWheelClickAt < 32) return;
+  lastWheelClickAt = now;
+
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    try {
+      navigator.vibrate(4);
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!soundEnabled) return;
+  const norm = Math.min(1, Math.max(0, volumePercent / 100));
+  if (norm <= 0.02) return;
+
+  unlockAudio();
+  const clickHowl = getHowl('__focus_tick', tickMp3);
+  const id = clickHowl.play();
+  clickHowl.rate(1.32, id);
+  setHowlSoundGain(clickHowl, id, norm * 1.45);
+}
+
 export function sendDesktopNotification(title: string, body: string): void {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
   if (Notification.permission === 'granted') {
