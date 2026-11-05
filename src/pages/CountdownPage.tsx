@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, Clock, Sparkles, Sun } from 'lucide-react';
 import { FlipCard } from '../components/FlipCard';
+import { TimeWheelPopoverField } from '../components/IOSTimerWheelPicker';
 import type { AppSettings, CountdownEventTarget } from '../types';
 import { readStorage, writeStorage } from '../utils/storage';
 import { getLanguageMeta, getStrings } from '../i18n';
@@ -321,12 +322,16 @@ export const CountdownPage: React.FC<CountdownPageProps> = ({
                 <label htmlFor="cd-time" className="field-label">
                   {t.timeLabel}
                 </label>
-                <input
+                <TimeWheelPopoverField
                   id="cd-time"
-                  type="time"
                   value={timeVal}
-                  onChange={(e) => setTimeVal(e.target.value)}
-                  className="input"
+                  onChange={setTimeVal}
+                  use24Hour={settings.use24Hour}
+                  amLabel={isAr ? 'ص' : 'AM'}
+                  pmLabel={isAr ? 'م' : 'PM'}
+                  doneLabel={isAr ? 'تم' : 'Done'}
+                  volume={settings.volume}
+                  soundEnabled={settings.soundEnabled}
                 />
               </div>
             </div>

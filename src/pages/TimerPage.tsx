@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BellRing, Pause, Play, RotateCcw } from 'lucide-react';
 import { FlipCard, FlipColon } from '../components/FlipCard';
+import { DurationWheelPicker } from '../components/IOSTimerWheelPicker';
 import type { AppSettings } from '../types';
 import {
   playSoundOnce,
@@ -415,56 +416,18 @@ export const TimerPage: React.FC<TimerPageProps> = ({
 
             <div className="custom-time-group">
               <span className="custom-time-heading">{t.customTime}</span>
-              <div className="custom-time" aria-label={t.customTime}>
-                <div className="custom-time-field">
-                  <input
-                    id="timer-hours-input"
-                    type="number"
-                    min={0}
-                    max={99}
-                    value={inH}
-                    disabled={running}
-                    onFocus={(e) => e.target.select()}
-                    onChange={(e) => handleInputChange(Number(e.target.value), inM, inS)}
-                    className="time-input"
-                  />
-                  <label htmlFor="timer-hours-input">{t.hours}</label>
-                </div>
-                <span className="custom-time-colon" aria-hidden="true">
-                  :
-                </span>
-                <div className="custom-time-field">
-                  <input
-                    id="timer-minutes-input"
-                    type="number"
-                    min={0}
-                    max={59}
-                    value={inM}
-                    disabled={running}
-                    onFocus={(e) => e.target.select()}
-                    onChange={(e) => handleInputChange(inH, Number(e.target.value), inS)}
-                    className="time-input"
-                  />
-                  <label htmlFor="timer-minutes-input">{t.minutes}</label>
-                </div>
-                <span className="custom-time-colon" aria-hidden="true">
-                  :
-                </span>
-                <div className="custom-time-field">
-                  <input
-                    id="timer-seconds-input"
-                    type="number"
-                    min={0}
-                    max={59}
-                    value={inS}
-                    disabled={running}
-                    onFocus={(e) => e.target.select()}
-                    onChange={(e) => handleInputChange(inH, inM, Number(e.target.value))}
-                    className="time-input"
-                  />
-                  <label htmlFor="timer-seconds-input">{t.seconds}</label>
-                </div>
-              </div>
+              <DurationWheelPicker
+                hours={inH}
+                minutes={inM}
+                seconds={inS}
+                disabled={running}
+                hoursLabel={isAr ? 'ساعة' : 'hr'}
+                minutesLabel={isAr ? 'دقيقة' : 'min'}
+                secondsLabel={isAr ? 'ثانية' : 'sec'}
+                volume={settings.volume}
+                soundEnabled={settings.soundEnabled}
+                onChange={handleInputChange}
+              />
             </div>
           </div>
         </div>
