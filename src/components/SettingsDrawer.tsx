@@ -7,7 +7,12 @@ import {
   SoundProfile,
   ThemeMode,
 } from '../types';
-import { playSoundOnce } from '../utils/soundEngine';
+import {
+  playSoundOnce,
+  stopAlarmLoop,
+  subscribeSoundState,
+  togglePreviewSound,
+} from '../utils/soundEngine';
 import { getStrings } from '../i18n';
 
 interface SettingsDrawerProps {
@@ -85,13 +90,22 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   const t = getStrings(settings.language);
 
   useEffect(() => {
-    if (!open) return;
+    return subscribeSoundState((playing, mode) => {
+      setTestingSound(playing && mode === 'preview');
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      if (testingSound) stopAlarmLoop();
+      return;
+    }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, onClose, testingSound]);
 
   const applyPreset = (preset: 'classic' | 'short' | 'long') => {
     if (preset === 'classic') {
@@ -119,10 +133,14 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   };
 
   const handleTestSound = () => {
-    if (testingSound) return;
-    setTestingSound(true);
-    playSoundOnce(settings.soundProfile, settings.volume);
-    window.setTimeout(() => setTestingSound(false), 900);
+    const vol = activeRoute === 'alarm' ? Math.max(10, settings.volume) : settings.volume;
+    togglePreviewSound(settings.soundProfile, Math.max(10, vol));
+  };
+
+  const handleSelectSound = (next: SoundProfile) => {
+    onUpdate({ soundProfile: next });
+    const vol = activeRoute === 'alarm' ? Math.max(10, settings.volume) : settings.volume;
+    playSoundOnce(next, Math.max(15, vol));
   };
 
   const handleReset = () => {
@@ -146,12 +164,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
     { value: 'melody', label: t.soundMelody },
   ];
 
-  const studySoundOptions: { value: SoundProfile; label: string }[] = [
-    { value: 'bell', label: t.soundBell },
-    { value: 'chime', label: t.soundChime },
-    { value: 'digital', label: t.soundDigital },
-    { value: 'melody', label: t.soundMelody },
-  ];
+  const studySoundOptions = allSoundOptions;
 
   const themeChoices: { id: ThemeMode; label: string }[] = [
     { id: 'dark', label: t.themeDark },
@@ -375,13 +388,9 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                     <div className="settings-row">
                       <span>{t.selectSound}</span>
                       <select
-                        value={
-                          studySoundOptions.some((s) => s.value === settings.soundProfile)
-                            ? settings.soundProfile
-                            : 'bell'
-                        }
+                        value={settings.soundProfile}
                         disabled={!settings.soundEnabled}
-                        onChange={(e) => onUpdate({ soundProfile: e.target.value as SoundProfile })}
+                        onChange={(e) => handleSelectSound(e.target.value as SoundProfile)}
                         className="input sound-selector"
                       >
                         {studySoundOptions.map((s) => (
@@ -409,14 +418,21 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                     </div>
                     <button
                       type="button"
-                      disabled={!settings.soundEnabled || testingSound}
+                      disabled={!settings.soundEnabled}
+                      aria-pressed={testingSound}
                       className="settings-row row-button"
                       onClick={handleTestSound}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                      </svg>
+                      {testingSound ? (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                          <rect x="6" y="6" width="12" height="12" rx="2.5" />
+                        </svg>
+                      ) : (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        </svg>
+                      )}
                       <span>{t.testSound}</span>
                     </button>
                   </div>
@@ -492,7 +508,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                     <select
                       value={settings.soundProfile}
                       disabled={!settings.soundEnabled}
-                      onChange={(e) => onUpdate({ soundProfile: e.target.value as SoundProfile })}
+                      onChange={(e) => handleSelectSound(e.target.value as SoundProfile)}
                       className="input sound-selector"
                     >
                       {allSoundOptions.map((s) => (
@@ -527,14 +543,21 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                   </label>
                   <button
                     type="button"
-                    disabled={!settings.soundEnabled || testingSound}
+                    disabled={!settings.soundEnabled}
+                    aria-pressed={testingSound}
                     className="settings-row row-button"
                     onClick={handleTestSound}
                   >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                    </svg>
+                    {testingSound ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="6" y="6" width="12" height="12" rx="2.5" />
+                      </svg>
+                    ) : (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                      </svg>
+                    )}
                     <span>{t.testSound}</span>
                   </button>
                 </div>
@@ -551,7 +574,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                   <span>{t.selectSound}</span>
                   <select
                     value={settings.soundProfile}
-                    onChange={(e) => onUpdate({ soundProfile: e.target.value as SoundProfile })}
+                    onChange={(e) => handleSelectSound(e.target.value as SoundProfile)}
                     className="input sound-selector"
                   >
                     {allSoundOptions.map((s) => (
@@ -594,14 +617,20 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 </div>
                 <button
                   type="button"
-                  disabled={testingSound}
+                  aria-pressed={testingSound}
                   className="settings-row row-button"
                   onClick={handleTestSound}
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                  </svg>
+                  {testingSound ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                      <rect x="6" y="6" width="12" height="12" rx="2.5" />
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                    </svg>
+                  )}
                   <span>{t.testSound}</span>
                 </button>
               </div>

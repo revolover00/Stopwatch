@@ -1,8 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BellRing, Pause, Play, RotateCcw } from 'lucide-react';
 import { FlipCard, FlipColon } from '../components/FlipCard';
 import type { AppSettings } from '../types';
-import { playSoundOnce, startAlarmLoop, stopAlarmLoop } from '../utils/soundEngine';
+import {
+  playSoundOnce,
+  sendDesktopNotification,
+  startAlarmLoop,
+  stopAlarmLoop,
+} from '../utils/soundEngine';
+import { readStorage, writeStorage } from '../utils/storage';
 import { getStrings } from '../i18n';
 
 interface TimerPageProps {
@@ -10,6 +16,15 @@ interface TimerPageProps {
   externalSecondsPreset?: number | null;
   onConsumeExternalPreset?: () => void;
 }
+
+interface PersistedTimerState {
+  totalSeconds: number;
+  remainingMs: number;
+  endAt: number;
+  running: boolean;
+}
+
+const TIMER_STATE_KEY = 'splitflap_timer_state_v2';
 
 const PRESETS: { label: string; seconds: number }[] = [
   { label: '15 sec', seconds: 15 },
@@ -42,14 +57,72 @@ export const TimerPage: React.FC<TimerPageProps> = ({
   const t = getStrings(settings.language);
   const isAr = settings.language === 'ar';
 
-  const [totalSeconds, setTotalSeconds] = useState<number>(300);
-  const [remainingSeconds, setRemainingSeconds] = useState<number>(300);
-  const [running, setRunning] = useState<boolean>(false);
-  const [ringing, setRinging] = useState<boolean>(false);
+  const initialTimer = useMemo(() => {
+    const saved = readStorage<PersistedTimerState>(TIMER_STATE_KEY, {
+      totalSeconds: 300,
+      remainingMs: 300 * 1000,
+      endAt: 0,
+      running: false,
+    });
+    const total = Math.max(0, Math.min(99 * 3600 + 59 * 60 + 59, Number(saved.totalSeconds) || 300));
+    if (saved.running && saved.endAt > 0) {
+      const leftMs = saved.endAt - Date.now();
+      if (leftMs > 0) {
+        return {
+          totalSeconds: total,
+          remainingSeconds: Math.max(1, Math.ceil(leftMs / 1000)),
+          remainingMs: leftMs,
+          endAt: saved.endAt,
+          running: true,
+          expiredWhileAway: false,
+        };
+      }
+      return {
+        totalSeconds: total,
+        remainingSeconds: 0,
+        remainingMs: 0,
+        endAt: 0,
+        running: false,
+        expiredWhileAway: true,
+      };
+    }
+    const remMs =
+      typeof saved.remainingMs === 'number' && saved.remainingMs >= 0
+        ? Math.min(total * 1000, saved.remainingMs)
+        : total * 1000;
+    return {
+      totalSeconds: total,
+      remainingSeconds: Math.ceil(remMs / 1000),
+      remainingMs: remMs,
+      endAt: 0,
+      running: false,
+      expiredWhileAway: false,
+    };
+  }, []);
 
-  const [inH, setInH] = useState<number>(0);
-  const [inM, setInM] = useState<number>(5);
-  const [inS, setInS] = useState<number>(0);
+  const [totalSeconds, setTotalSeconds] = useState<number>(initialTimer.totalSeconds);
+  const [remainingSeconds, setRemainingSeconds] = useState<number>(initialTimer.remainingSeconds);
+  const [running, setRunning] = useState<boolean>(initialTimer.running);
+  const [ringing, setRinging] = useState<boolean>(initialTimer.expiredWhileAway);
+
+  const endAtRef = useRef<number>(initialTimer.endAt);
+  const remainingMsRef = useRef<number>(initialTimer.remainingMs);
+
+  const [inH, setInH] = useState<number>(() => Math.floor(initialTimer.totalSeconds / 3600));
+  const [inM, setInM] = useState<number>(() => Math.floor((initialTimer.totalSeconds % 3600) / 60));
+  const [inS, setInS] = useState<number>(() => initialTimer.totalSeconds % 60);
+
+  const persistTimer = useCallback(
+    (nextTotal: number, nextRemMs: number, nextEndAt: number, nextRunning: boolean) => {
+      writeStorage<PersistedTimerState>(TIMER_STATE_KEY, {
+        totalSeconds: nextTotal,
+        remainingMs: Math.max(0, nextRemMs),
+        endAt: nextEndAt,
+        running: nextRunning,
+      });
+    },
+    []
+  );
 
   const syncCustomInputs = (secs: number) => {
     setInH(Math.floor(secs / 3600));
@@ -57,16 +130,81 @@ export const TimerPage: React.FC<TimerPageProps> = ({
     setInS(secs % 60);
   };
 
+  const triggerTimerComplete = useCallback(() => {
+    endAtRef.current = 0;
+    remainingMsRef.current = 0;
+    setRunning(false);
+    setRemainingSeconds(0);
+    setRinging(true);
+    persistTimer(totalSeconds, 0, 0, false);
+
+    if (settings.soundEnabled) {
+      if (settings.ringUntilStopped) {
+        startAlarmLoop(settings.soundProfile, settings.volume, settings.gradualVolume);
+      } else {
+        playSoundOnce(settings.soundProfile, settings.volume);
+      }
+    }
+    sendDesktopNotification(t.timesUp, `${t.headerTimer}`);
+  }, [
+    persistTimer,
+    totalSeconds,
+    settings.soundEnabled,
+    settings.ringUntilStopped,
+    settings.soundProfile,
+    settings.volume,
+    settings.gradualVolume,
+    t.timesUp,
+    t.headerTimer,
+  ]);
+
+  const startOrResume = useCallback(() => {
+    const baseMs =
+      remainingMsRef.current > 0 ? remainingMsRef.current : totalSeconds * 1000;
+    if (baseMs <= 0) return;
+    const nextEnd = Date.now() + baseMs;
+    endAtRef.current = nextEnd;
+    remainingMsRef.current = baseMs;
+    setRinging(false);
+    setRemainingSeconds(Math.max(1, Math.ceil(baseMs / 1000)));
+    setRunning(true);
+    persistTimer(totalSeconds, baseMs, nextEnd, true);
+  }, [totalSeconds, persistTimer]);
+
+  const pauseTimer = useCallback(() => {
+    const leftMs = Math.max(0, endAtRef.current - Date.now());
+    endAtRef.current = 0;
+    remainingMsRef.current = leftMs;
+    setRunning(false);
+    setRemainingSeconds(Math.ceil(leftMs / 1000));
+    persistTimer(totalSeconds, leftMs, 0, false);
+  }, [totalSeconds, persistTimer]);
+
+  const resetTimer = useCallback(() => {
+    stopAlarmLoop();
+    endAtRef.current = 0;
+    remainingMsRef.current = totalSeconds * 1000;
+    setRunning(false);
+    setRinging(false);
+    setRemainingSeconds(totalSeconds);
+    persistTimer(totalSeconds, totalSeconds * 1000, 0, false);
+  }, [totalSeconds, persistTimer]);
+
   useEffect(() => {
     if (externalSecondsPreset && externalSecondsPreset > 0) {
       const secs = Math.min(99 * 3600 + 59 * 60 + 59, externalSecondsPreset);
+      stopAlarmLoop();
+      endAtRef.current = 0;
+      remainingMsRef.current = secs * 1000;
       setRunning(false);
+      setRinging(false);
       setTotalSeconds(secs);
       setRemainingSeconds(secs);
       syncCustomInputs(secs);
+      persistTimer(secs, secs * 1000, 0, false);
       onConsumeExternalPreset?.();
     }
-  }, [externalSecondsPreset, onConsumeExternalPreset]);
+  }, [externalSecondsPreset, onConsumeExternalPreset, persistTimer]);
 
   useEffect(() => {
     return () => stopAlarmLoop();
@@ -74,33 +212,37 @@ export const TimerPage: React.FC<TimerPageProps> = ({
 
   useEffect(() => {
     if (!running) return;
-    const id = window.setInterval(() => {
-      setRemainingSeconds((prev) => {
-        if (prev <= 1) {
-          setRunning(false);
-          setRinging(true);
-          if (settings.soundEnabled) {
-            if (settings.ringUntilStopped) {
-              startAlarmLoop(settings.soundProfile, settings.volume, settings.gradualVolume);
-            } else {
-              playSoundOnce(settings.soundProfile, settings.volume);
-            }
-          }
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [running, settings]);
+    if (!endAtRef.current) {
+      endAtRef.current = Date.now() + Math.max(1000, remainingSeconds * 1000);
+    }
+
+    const checkTick = () => {
+      const leftMs = endAtRef.current - Date.now();
+      if (leftMs <= 0) {
+        triggerTimerComplete();
+        return;
+      }
+      remainingMsRef.current = leftMs;
+      setRemainingSeconds(Math.max(1, Math.ceil(leftMs / 1000)));
+    };
+
+    checkTick();
+    const id = window.setInterval(checkTick, 200);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') checkTick();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [running, remainingSeconds, triggerTimerComplete]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (ringing) {
         if (e.key === 'Escape') {
-          stopAlarmLoop();
-          setRinging(false);
-          setRemainingSeconds(totalSeconds);
+          resetTimer();
         }
         return;
       }
@@ -108,20 +250,24 @@ export const TimerPage: React.FC<TimerPageProps> = ({
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.code === 'Space' && !e.repeat && totalSeconds > 0) {
         e.preventDefault();
-        setRemainingSeconds((rem) => (rem === 0 ? totalSeconds : rem));
-        setRunning((r) => !r);
+        if (running) pauseTimer();
+        else startOrResume();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ringing, totalSeconds]);
+  }, [ringing, totalSeconds, running, pauseTimer, startOrResume, resetTimer]);
 
   const applyDuration = (secs: number) => {
     const safe = Math.max(0, Math.min(99 * 3600 + 59 * 60 + 59, secs));
+    stopAlarmLoop();
+    endAtRef.current = 0;
+    remainingMsRef.current = safe * 1000;
     setRunning(false);
     setRinging(false);
     setTotalSeconds(safe);
     setRemainingSeconds(safe);
+    persistTimer(safe, safe * 1000, 0, false);
   };
 
   const handleSelectPreset = (secs: number) => {
@@ -141,16 +287,18 @@ export const TimerPage: React.FC<TimerPageProps> = ({
   };
 
   const handleDismissRing = () => {
-    stopAlarmLoop();
-    setRinging(false);
-    setRemainingSeconds(totalSeconds);
+    resetTimer();
   };
 
   const handleRestartFromRing = () => {
     stopAlarmLoop();
     setRinging(false);
+    remainingMsRef.current = totalSeconds * 1000;
+    const nextEnd = Date.now() + totalSeconds * 1000;
+    endAtRef.current = nextEnd;
     setRemainingSeconds(totalSeconds);
     setRunning(true);
+    persistTimer(totalSeconds, totalSeconds * 1000, nextEnd, true);
   };
 
   const hrs = String(Math.floor(remainingSeconds / 3600)).padStart(2, '0');
@@ -165,6 +313,25 @@ export const TimerPage: React.FC<TimerPageProps> = ({
   const isPausedMidway = !running && remainingSeconds > 0 && remainingSeconds < totalSeconds;
   const progress =
     totalSeconds > 0 ? Math.min(1, Math.max(0, 1 - remainingSeconds / totalSeconds)) : 0;
+
+  useEffect(() => {
+    document.body.classList.toggle('timer-running', running || isPausedMidway);
+    return () => {
+      document.body.classList.remove('timer-running');
+    };
+  }, [running, isPausedMidway]);
+
+  useEffect(() => {
+    if (running || isPausedMidway) {
+      const prefix = hrs !== '00' ? `${hrs}:${mins}:${secs}` : `${mins}:${secs}`;
+      document.title = `${prefix} · ${t.headerTimer}`;
+    } else {
+      document.title = `${t.headerTimer} — Flip Clock`;
+    }
+    return () => {
+      document.title = 'Flip Clock';
+    };
+  }, [running, isPausedMidway, hrs, mins, secs, t.headerTimer]);
 
   return (
     <>
@@ -194,15 +361,12 @@ export const TimerPage: React.FC<TimerPageProps> = ({
             </div>
           </div>
 
-          {/* Primary Equal Controls */}
-          <div className="controls equal hide-in-fullscreen">
+          {/* Primary Equal Controls (remain visible in Fullscreen per aflipclock.com) */}
+          <div className="controls equal">
             <button
               type="button"
               disabled={!running && remainingSeconds === totalSeconds}
-              onClick={() => {
-                setRunning(false);
-                setRemainingSeconds(totalSeconds);
-              }}
+              onClick={resetTimer}
               className="btn btn-lg btn-secondary"
             >
               <RotateCcw className="w-[18px] h-[18px]" />
@@ -213,8 +377,8 @@ export const TimerPage: React.FC<TimerPageProps> = ({
               type="button"
               disabled={totalSeconds === 0}
               onClick={() => {
-                if (remainingSeconds === 0) setRemainingSeconds(totalSeconds);
-                setRunning((r) => !r);
+                if (running) pauseTimer();
+                else startOrResume();
               }}
               className="btn btn-lg btn-primary"
             >
