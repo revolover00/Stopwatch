@@ -44,6 +44,7 @@ const Stepper: React.FC<{
   <div className="stepper" dir="ltr">
     <button
       type="button"
+      className="time-button"
       onClick={() => onChange(Math.max(min, value - 1))}
       aria-label="Decrease"
     >
@@ -62,6 +63,7 @@ const Stepper: React.FC<{
     />
     <button
       type="button"
+      className="time-button"
       onClick={() => onChange(Math.min(max, value + 1))}
       aria-label="Increase"
     >
@@ -173,7 +175,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   return (
     <>
       <div
-        className={`settings-overlay ${open ? 'open' : ''}`}
+        className={`settings-scrim ${open ? 'open' : ''}`}
         onClick={onClose}
         aria-hidden={!open}
       />
@@ -185,7 +187,9 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
         aria-label={t.settingsTitle}
       >
         <div className="settings-header">
-          <h2>{activeRoute === 'study' ? t.studySettingsTitle : t.settingsTitle}</h2>
+          <h2 className="settings-title">
+            {activeRoute === 'study' ? t.studySettingsTitle : t.settingsTitle}
+          </h2>
           <button
             type="button"
             className="icon-button"
@@ -203,19 +207,20 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
           {/* Theme Selection */}
           <div className="settings-group">
             <h3 className="settings-group-title">{t.themeSelection}</h3>
-            <div className="theme-picker">
+            <div className="theme-picker" role="radiogroup" aria-label={t.themeSelection}>
               {themeChoices.map((th) => (
                 <button
                   key={th.id}
                   type="button"
-                  data-theme-choice={th.id}
-                  className={`theme-swatch ${settings.theme === th.id ? 'active' : ''}`}
+                  role="radio"
+                  aria-checked={settings.theme === th.id}
+                  className="theme-option"
                   onClick={() => onUpdate({ theme: th.id })}
                 >
-                  <span className="theme-swatch-face" dir="ltr">
-                    <span className="theme-swatch-card">12</span>
+                  <span className={`theme-swatch theme-swatch-${th.id}`} dir="ltr">
+                    <span>12</span>
                   </span>
-                  <span className="theme-swatch-name">{th.label}</span>
+                  <span className="theme-name">{th.label}</span>
                 </button>
               ))}
             </div>
@@ -224,17 +229,20 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
           {/* Flip Style */}
           <div className="settings-group">
             <h3 className="settings-group-title">{t.flipStyle}</h3>
-            <div className="look-picker">
+            <div className="look-picker" role="radiogroup" aria-label={t.flipStyle}>
               {styleChoices.map((st) => (
                 <button
                   key={st.id}
                   type="button"
-                  data-look-choice={st.id}
-                  className={`look-swatch ${settings.flipStyle === st.id ? 'active' : ''}`}
+                  role="radio"
+                  aria-checked={settings.flipStyle === st.id}
+                  className="look-option"
                   onClick={() => onUpdate({ flipStyle: st.id })}
                 >
-                  <span className="look-swatch-card" dir="ltr">12</span>
-                  <span className="look-swatch-name">{st.label}</span>
+                  <span className={`look-swatch look-swatch-${st.id}`} dir="ltr">
+                    <span>12</span>
+                  </span>
+                  <span className="look-name">{st.label}</span>
                 </button>
               ))}
             </div>
@@ -279,7 +287,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
             <>
               <div className="settings-group">
                 <h3 className="settings-group-title">{t.presets}</h3>
-                <div className="preset-row">
+                <div className="chip-row">
                   {(
                     [
                       { id: 'classic', label: t.presetClassic },
@@ -386,7 +394,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                     <div className="settings-row stacked">
                       <div className="settings-row-head">
                         <span>{t.volume}</span>
-                        <span className="range-value" dir="ltr">{settings.volume}%</span>
+                        <span className="settings-value" dir="ltr">{settings.volume}%</span>
                       </div>
                       <input
                         type="range"
@@ -405,11 +413,11 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                       className="settings-row row-button"
                       onClick={handleTestSound}
                     >
-                      <span>{t.testSound}</span>
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
                         <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
                       </svg>
+                      <span>{t.testSound}</span>
                     </button>
                   </div>
                   <label className="settings-row">
@@ -497,7 +505,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                   <div className="settings-row stacked">
                     <div className="settings-row-head">
                       <span>{t.volume}</span>
-                      <span className="range-value" dir="ltr">{settings.volume}%</span>
+                      <span className="settings-value" dir="ltr">{settings.volume}%</span>
                     </div>
                     <input
                       type="range"
@@ -523,11 +531,11 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                     className="settings-row row-button"
                     onClick={handleTestSound}
                   >
-                    <span>{t.testSound}</span>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
                       <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
                     </svg>
+                    <span>{t.testSound}</span>
                   </button>
                 </div>
               </div>
@@ -556,7 +564,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 <div className="settings-row stacked">
                   <div className="settings-row-head">
                     <span>{t.volume}</span>
-                    <span className="range-value" dir="ltr">{Math.max(10, settings.volume)}%</span>
+                    <span className="settings-value" dir="ltr">{Math.max(10, settings.volume)}%</span>
                   </div>
                   <input
                     type="range"
@@ -590,11 +598,11 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                   className="settings-row row-button"
                   onClick={handleTestSound}
                 >
-                  <span>{t.testSound}</span>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
                     <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
                   </svg>
+                  <span>{t.testSound}</span>
                 </button>
               </div>
             </div>
@@ -610,12 +618,12 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 <div className="settings-row-head">
                   <span>{t.layout}</span>
                 </div>
-                <div className="layout-options">
+                <div className="segmented layout-options">
                   {layoutChoices.map((ly) => (
                     <button
                       key={ly.id}
                       type="button"
-                      className={`layout-option ${settings.layout === ly.id ? 'active' : ''}`}
+                      className={settings.layout === ly.id ? 'active' : ''}
                       onClick={() => onUpdate({ layout: ly.id })}
                     >
                       {ly.label}
@@ -627,7 +635,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
               <div className="settings-row stacked">
                 <div className="settings-row-head">
                   <span>{t.size}</span>
-                  <span className="range-value" dir="ltr">{settings.sizePercent}%</span>
+                  <span className="settings-value" dir="ltr">{settings.sizePercent}%</span>
                 </div>
                 <input
                   type="range"
@@ -645,7 +653,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 <div className="settings-row stacked">
                   <div className="settings-row-head">
                     <span>{t.cornerRadius}</span>
-                    <span className="range-value" dir="ltr">{settings.cornerRadius}px</span>
+                    <span className="settings-value" dir="ltr">{settings.cornerRadius}px</span>
                   </div>
                   <input
                     type="range"

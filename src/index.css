@@ -1621,6 +1621,7 @@ body[data-look="pro"] .flip-panel-bottom.flip-b { animation: flip-pro-land-b var
 }
 
 .nav-dock-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1632,6 +1633,12 @@ body[data-look="pro"] .flip-panel-bottom.flip-b { animation: flip-pro-land-b var
   color: var(--text-2);
   text-decoration: none;
   transition: color 0.2s ease, background-color 0.2s ease, transform 0.15s var(--ease-out);
+}
+
+.nav-dock-item svg {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
 }
 
 .nav-dock-item-label {
