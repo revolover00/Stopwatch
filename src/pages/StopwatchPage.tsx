@@ -1,151 +1,279 @@
-import { useCallback, useEffect, useMemo } from 'react';
-import { LapTable } from '../components/stopwatch/LapTable';
-import { FlipClock } from '../components/flip/FlipClock';
-import { ClockStage } from '../components/ui/ClockStage';
-import { HelpSections } from '../components/ui/HelpSections';
-import { PageHeading } from '../components/ui/PageHeading';
-import { RelatedTools, type ToolLink } from '../components/ui/RelatedTools';
-import { TimerControls, type RunState } from '../components/ui/TimerControls';
-import { STOPWATCH_HELP } from '../content/help';
-import { useSettings } from '../context/SettingsContext';
-import { useStopwatch } from '../hooks/useStopwatch';
-import { toHmsParts } from '../lib/clock';
-import { computeLapStats } from '../lib/laps';
-import { playTick } from '../lib/sound';
-import { formatDuration } from '../lib/time';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Flag, Pause, Play, RotateCcw } from 'lucide-react';
+import { CentisCard, FlipCard, FlipColon } from '../components/FlipCard';
+import type { AppSettings, LapRecord } from '../types';
+import { getStrings } from '../i18n';
 
-const TOOLS: readonly ToolLink[] = [
-  { to: '/timer/', title: 'Timer', description: 'Count down from a set duration.' },
-  { to: '/study-timer/', title: 'Study timer', description: 'Focus sessions with breaks.' },
-  { to: '/countdown/', title: 'Countdown', description: 'Days left until a date.' },
-  { to: '/', title: 'Flip clock', description: 'The current time on flip cards.' },
-];
+interface StopwatchPageProps {
+  settings: AppSettings;
+}
 
-const isTypingTarget = (target: EventTarget | null): boolean =>
-  target instanceof HTMLElement &&
-  target.closest('input, textarea, select, button, a, [contenteditable="true"]') !== null;
+function formatMs(ms: number): string {
+  const totalCentis = Math.floor(ms / 10);
+  const c = String(totalCentis % 100).padStart(2, '0');
+  const totalSec = Math.floor(totalCentis / 100);
+  const s = String(totalSec % 60).padStart(2, '0');
+  const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
+  const h = Math.floor(totalSec / 3600);
+  return h > 0 ? `${String(h).padStart(2, '0')}:${m}:${s}.${c}` : `${m}:${s}.${c}`;
+}
 
-export function StopwatchPage() {
-  const stopwatch = useStopwatch();
-  const { settings } = useSettings();
-  const stats = useMemo(() => computeLapStats(stopwatch.laps), [stopwatch.laps]);
+export const StopwatchPage: React.FC<StopwatchPageProps> = ({ settings }) => {
+  const t = getStrings(settings.language);
+  const isAr = settings.language === 'ar';
 
-  const { status, isRunning, toggle, recordLap, reset } = stopwatch;
-  const { hours, minutes, seconds } = toHmsParts(stopwatch.elapsedMs);
-  const centiseconds = Math.floor((stopwatch.elapsedMs % 1000) / 10);
+  const [elapsedMs, setElapsedMs] = useState<number>(0);
+  const [running, setRunning] = useState<boolean>(false);
+  const [laps, setLaps] = useState<LapRecord[]>([]);
+  const [lockedTopMargin, setLockedTopMargin] = useState<number | null>(null);
 
-  const handleLap = useCallback(() => {
-    recordLap();
-    if (settings.soundEnabled) playTick(settings.volume);
-  }, [recordLap, settings.soundEnabled, settings.volume]);
+  const startRef = useRef<number>(0);
+  const accRef = useRef<number>(0);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    document.title =
-      stopwatch.elapsedMs > 0 || isRunning
-        ? `${formatDuration(stopwatch.elapsedMs)} — Stopwatch`
-        : 'Stopwatch — FlipDeck';
-  }, [stopwatch.elapsedMs, isRunning]);
+    if (!running) return;
+    startRef.current = performance.now();
+    let rafId = 0;
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
+    const tick = () => {
+      const now = performance.now();
+      setElapsedMs(accRef.current + (now - startRef.current));
+      rafId = window.requestAnimationFrame(tick);
+    };
+    rafId = window.requestAnimationFrame(tick);
 
-      if (event.code === 'Space') {
-        event.preventDefault();
-        toggle();
-        return;
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [running]);
+
+  const handleToggleRun = useCallback(() => {
+    if (running) {
+      accRef.current += performance.now() - startRef.current;
+      setElapsedMs(accRef.current);
+      setRunning(false);
+    } else {
+      setRunning(true);
+    }
+  }, [running]);
+
+  const handleLapOrReset = useCallback(() => {
+    if (running) {
+      if (laps.length === 0 && stageRef.current && wrapperRef.current) {
+        const wrapperRect = wrapperRef.current.getBoundingClientRect();
+        const stageRect = stageRef.current.getBoundingClientRect();
+        const currentTop = Math.max(0, stageRect.top - wrapperRect.top - 24);
+        setLockedTopMargin(currentTop);
       }
+      const currentTotal = accRef.current + (performance.now() - startRef.current);
+      const prevTotal = laps.length > 0 ? laps[0].totalMs : 0;
+      const lapDuration = Math.max(0, currentTotal - prevTotal);
+      setLaps((prev) => [
+        {
+          lapNumber: prev.length + 1,
+          lapMs: lapDuration,
+          totalMs: currentTotal,
+        },
+        ...prev,
+      ]);
+    } else {
+      accRef.current = 0;
+      setElapsedMs(0);
+      setLaps([]);
+      setLockedTopMargin(null);
+    }
+  }, [running, laps]);
 
-      const key = event.key.toLowerCase();
-      if (key === 'l') {
-        event.preventDefault();
-        handleLap();
-      } else if (key === 'r') {
-        event.preventDefault();
-        reset();
+  // Keyboard shortcuts: Space (Start/Pause), L (Lap), R (Reset)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.repeat) return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handleToggleRun();
+      } else if (e.code === 'KeyL' && running) {
+        e.preventDefault();
+        handleLapOrReset();
+      } else if (e.code === 'KeyR' && !running && elapsedMs > 0) {
+        e.preventDefault();
+        handleLapOrReset();
       }
     };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [running, elapsedMs, handleToggleRun, handleLapOrReset]);
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [toggle, handleLap, reset]);
+  const totalCentis = Math.floor(elapsedMs / 10);
+  const centis = String(totalCentis % 100).padStart(2, '0');
+  const totalSec = Math.floor(totalCentis / 100);
+  const secs = String(totalSec % 60).padStart(2, '0');
+  const mins = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
+  const hrs = String(Math.floor(totalSec / 3600)).padStart(2, '0');
 
-  const runState: RunState = status;
-  const statusText = status === 'running' ? 'Running' : status === 'paused' ? 'Paused' : 'Ready';
+  const { bestLapNum, worstLapNum } = useMemo(() => {
+    if (laps.length < 2) return { bestLapNum: -1, worstLapNum: -1 };
+    let best = laps[0];
+    let worst = laps[0];
+    for (const l of laps) {
+      if (l.lapMs < best.lapMs) best = l;
+      if (l.lapMs > worst.lapMs) worst = l;
+    }
+    return { bestLapNum: best.lapNumber, worstLapNum: worst.lapNumber };
+  }, [laps]);
 
   return (
     <>
-      <PageHeading
-        title="Stopwatch"
-        lead="Count upwards to the hundredth of a second, keep every lap split and export the set when you are finished."
-      />
-
-      <div className="mt-6">
-        <ClockStage
-          status={runState}
-          statusText={statusText}
-          footer={
-            <div className="flex flex-col items-center gap-4">
-              <TimerControls
-                state={runState}
-                onStart={toggle}
-                onPause={toggle}
-                onResume={toggle}
-                onReset={reset}
-                onLap={handleLap}
-                lapDisabled={!isRunning}
-                resetDisabled={status === 'idle' && stopwatch.laps.length === 0}
-              />
-
-              <dl className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-center">
-                <div>
-                  <dt className="label">Laps</dt>
-                  <dd className="numeric mt-1 text-small text-ink">{stats.count}</dd>
-                </div>
-                <div>
-                  <dt className="label">Best lap</dt>
-                  <dd className="numeric mt-1 text-small text-ink">
-                    {stats.bestSplitMs === null ? '—' : formatDuration(stats.bestSplitMs)}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="label">Average</dt>
-                  <dd className="numeric mt-1 text-small text-ink">
-                    {stats.averageSplitMs === null ? '—' : formatDuration(stats.averageSplitMs)}
-                  </dd>
-                </div>
-              </dl>
-
-              <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-caption text-muted">
-                <kbd className="kbd">Space</kbd> start / pause
-                <span aria-hidden="true" className="text-line">
-                  ·
-                </span>
-                <kbd className="kbd">L</kbd> lap
-                <span aria-hidden="true" className="text-line">
-                  ·
-                </span>
-                <kbd className="kbd">R</kbd> reset
-              </p>
-            </div>
+      <div
+        ref={wrapperRef}
+        className="page-content-wrapper"
+        style={
+          laps.length > 0 && lockedTopMargin !== null
+            ? { justifyContent: 'flex-start' }
+            : undefined
+        }
+      >
+        <div
+          ref={stageRef}
+          id="stopwatch-page"
+          className="page-container"
+          style={
+            laps.length > 0 && lockedTopMargin !== null
+              ? { marginTop: `${lockedTopMargin}px` }
+              : undefined
           }
         >
-          <FlipClock
-            groups={[
-              { value: hours, label: 'Hours' },
-              { value: minutes, label: 'Minutes' },
-              { value: seconds, label: 'Seconds' },
-              { value: centiseconds, label: 'Centiseconds', animate: false },
-            ]}
-            accessibleText={`Elapsed time ${formatDuration(stopwatch.elapsedMs)}`}
-          />
-        </ClockStage>
+          {/* 3 Main Flip Cards + Colons + Baseline-Aligned Half-Size Centiseconds Card */}
+          <div
+            className="flip-display stopwatch-display"
+            role="timer"
+            aria-label={`Elapsed ${hrs} hours ${mins} minutes ${secs} seconds`}
+          >
+            <FlipCard value={hrs} srLabel={`${hrs} Hours`} />
+            <FlipColon />
+            <FlipCard value={mins} srLabel={`${mins} Minutes`} />
+            <FlipColon />
+            <FlipCard value={secs} srLabel={`${secs} Seconds`} />
+            <CentisCard value={centis} />
+          </div>
+
+          {/* Equal Controls: Reset/Lap + Start/Pause/Resume */}
+          <div className="controls equal hide-in-fullscreen">
+            <button
+              type="button"
+              disabled={!running && elapsedMs === 0}
+              onClick={handleLapOrReset}
+              className="btn btn-lg btn-secondary"
+            >
+              {running ? (
+                <>
+                  <Flag className="w-[18px] h-[18px]" />
+                  <span>{t.lap}</span>
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-[18px] h-[18px]" />
+                  <span>{t.reset}</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleToggleRun}
+              className="btn btn-lg btn-primary"
+            >
+              {running ? (
+                <>
+                  <Pause className="w-[18px] h-[18px]" />
+                  <span>{t.pause}</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-[18px] h-[18px]" />
+                  <span>{elapsedMs > 0 ? t.resume : t.start}</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Lap Split Table (Green Best Lap / Red Worst Lap) */}
+          {laps.length > 0 ? (
+            <div className="laps hide-in-fullscreen" aria-label={t.lapCol}>
+              <table className="laps-table">
+                <thead>
+                  <tr>
+                    <th>{t.lapCol}</th>
+                    <th>{t.lapTimeCol}</th>
+                    <th>{t.totalTimeCol}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {laps.map((lap) => {
+                    const cls =
+                      lap.lapNumber === bestLapNum
+                        ? 'lap-best'
+                        : lap.lapNumber === worstLapNum
+                        ? 'lap-worst'
+                        : '';
+                    return (
+                      <tr key={lap.lapNumber} className={cls}>
+                        <td className="lap-number">{t.lapCol} {lap.lapNumber}</td>
+                        <td className="lap-time" dir="ltr">{formatMs(lap.lapMs)}</td>
+                        <td className="lap-total" dir="ltr">{formatMs(lap.totalMs)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      <LapTable laps={stopwatch.laps} stats={stats} />
+      <article className="info-article">
+        {isAr ? (
+          <>
+            <h2>ما هي ساعة الإيقاف القلّابة؟</h2>
+            <p>
+              تقيس ساعة الإيقاف الوقت المنقضي تصاعدياً من الصفر بدقة أجزاء من المئة من الثانية، مع تسجيل
+              الأشواط واللفات وتلوين أسرع لفة بالأخضر وأبطأ لفة بالأحمر تلقائياً.
+            </p>
+            <h2>كيفية تسجيل اللفات</h2>
+            <ul>
+              <li>اضغط <strong>بدء</strong> (أو مفتاح المسافة Space) لبدء الحساب.</li>
+              <li>اضغط <strong>لفة</strong> (أو حرف L) أثناء التشغيل لتسجيل زمن اللفة دون إيقاف العد.</li>
+              <li>اضغط <strong>إيقاف مؤقت</strong> ثم <strong>إعادة ضبط</strong> (أو حرف R) للتصفير.</li>
+            </ul>
+          </>
+        ) : (
+          <>
+            <h2>What Is a Split-Flap Online Stopwatch?</h2>
+            <p>
+              An online stopwatch measures elapsed time upward from zero with split-second accuracy.
+              Hours, minutes, and seconds turn on full split-flap cards, paired with a compact
+              hundredths card along the baseline.
+            </p>
 
-      <HelpSections blocks={STOPWATCH_HELP} />
-      <RelatedTools heading="Keep timing" tools={TOOLS} />
+            <h2>How to Record Splits &amp; Laps</h2>
+            <ul>
+              <li>
+                Press <strong>Start</strong> (or <strong>Space</strong>) to begin counting upward.
+              </li>
+              <li>
+                Press <strong>Lap</strong> (or <strong>L</strong>) while running to log split times
+                without interrupting the clock; fastest splits appear in green and slowest in red.
+              </li>
+              <li>
+                Press <strong>Pause</strong> to hold and <strong>Reset</strong> (or <strong>R</strong>)
+                when paused to clear back to zero.
+              </li>
+            </ul>
+          </>
+        )}
+      </article>
     </>
   );
-}
+};
