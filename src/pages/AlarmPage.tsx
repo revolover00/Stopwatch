@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { BellRing, ChevronDown, ChevronUp, Clock, Plus, Repeat, Trash2 } from 'lucide-react';
+import { BellRing, Clock, Plus, Repeat, Trash2 } from 'lucide-react';
 import { FlipCard, SecondsFlip } from '../components/FlipCard';
-import { UIDropdown } from '../components/UIDropdown';
+import { AlarmWheelPicker } from '../components/IOSTimerWheelPicker';
 import type { AlarmItem, AppSettings } from '../types';
 import { startAlarmLoop, stopAlarmLoop } from '../utils/soundEngine';
 import { readStorage, writeStorage } from '../utils/storage';
@@ -361,81 +361,19 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
           </div>
 
           <form onSubmit={handleAddAlarm}>
-            <div className="time-picker">
-              <div className="time-picker-column">
-                <button
-                  type="button"
-                  onClick={() => setPickHour((h) => (h + 1) % 24)}
-                  className="time-select-button"
-                  aria-label="Increase hour"
-                >
-                  <ChevronUp className="w-[20px] h-[20px]" />
-                </button>
-                <UIDropdown<number>
-                  id="select-hour"
-                  variant="time"
-                  triggerDir="ltr"
-                  ariaLabel={t.hour}
-                  value={pickHour}
-                  onChange={setPickHour}
-                  onWheelStep={(delta) => setPickHour((h) => (h + delta + 24) % 24)}
-                  options={Array.from({ length: 24 }).map((_, h) => ({
-                    value: h,
-                    label: settings.use24Hour
-                      ? String(h).padStart(2, '0')
-                      : `${String(h % 12 || 12).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`,
-                    dir: 'ltr',
-                  }))}
-                />
-                <button
-                  type="button"
-                  onClick={() => setPickHour((h) => (h + 23) % 24)}
-                  className="time-select-button"
-                  aria-label="Decrease hour"
-                >
-                  <ChevronDown className="w-[20px] h-[20px]" />
-                </button>
-                <span className="time-picker-label">{t.hour}</span>
-              </div>
-
-              <span className="time-picker-colon" aria-hidden="true">
-                :
-              </span>
-
-              <div className="time-picker-column">
-                <button
-                  type="button"
-                  onClick={() => setPickMinute((m) => (m + 1) % 60)}
-                  className="time-select-button"
-                  aria-label="Increase minute"
-                >
-                  <ChevronUp className="w-[20px] h-[20px]" />
-                </button>
-                <UIDropdown<number>
-                  id="select-minute"
-                  variant="time"
-                  triggerDir="ltr"
-                  ariaLabel={t.minute}
-                  value={pickMinute}
-                  onChange={setPickMinute}
-                  onWheelStep={(delta) => setPickMinute((m) => (m + delta + 60) % 60)}
-                  options={Array.from({ length: 60 }).map((_, m) => ({
-                    value: m,
-                    label: String(m).padStart(2, '0'),
-                    dir: 'ltr',
-                  }))}
-                />
-                <button
-                  type="button"
-                  onClick={() => setPickMinute((m) => (m + 59) % 60)}
-                  className="time-select-button"
-                  aria-label="Decrease minute"
-                >
-                  <ChevronDown className="w-[20px] h-[20px]" />
-                </button>
-                <span className="time-picker-label">{t.minute}</span>
-              </div>
-            </div>
+            <AlarmWheelPicker
+              hour24={pickHour}
+              minute={pickMinute}
+              use24Hour={settings.use24Hour}
+              amLabel={isAr ? 'ص' : 'AM'}
+              pmLabel={isAr ? 'م' : 'PM'}
+              volume={settings.volume}
+              soundEnabled={settings.soundEnabled}
+              onChange={(nextH, nextM) => {
+                setPickHour(nextH);
+                setPickMinute(nextM);
+              }}
+            />
 
             <div className="mt-4">
               <label htmlFor="alarm-label-input" className="field-label">
