@@ -1874,6 +1874,11 @@ body[data-look="pro"] .flip-panel-bottom.flip-b { animation: flip-pro-land-b var
   pointer-events: none;
 }
 
+.toast.fullscreen-notification,
+body.fullscreen-active .toast {
+  bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+}
+
 /* ==========================================================================
    Page-Specific Layout Rules
    ========================================================================== */
@@ -2563,16 +2568,22 @@ body[data-layout="vertical"] #timer-page {
 .custom-time-colon { height: 52px; line-height: 52px; font-size: 22px; font-weight: 600; color: var(--text-3); }
 
 /* 4. Stopwatch Page */
+.stopwatch-stage {
+  justify-content: flex-start;
+}
 #stopwatch-page {
   --cap: 1.5px;
+  --display-h: 220;
   --fit: min((100vw - 44px) / 722, (var(--vh100) - 400px + 1 * (32px - var(--stage-gap))) / 220);
   --card-w: calc(180 * var(--u));
   --card-h: calc(220 * var(--u));
   --card-r: calc(24 * var(--u));
   --card-gap: calc(14 * var(--u));
   --digit-size: calc(118 * var(--u));
+  margin-top: max(0px, calc((var(--vh100) - var(--header-h) - 24px - var(--dock-space) - var(--display-h) * var(--u) - var(--stage-gap) - 56px) / 2));
 }
 body[data-layout="vertical"] #stopwatch-page {
+  --display-h: 864;
   --fit: min((100vw - 44px) / 180, (var(--vh100) - 300px + (32px - var(--stage-gap))) / 864);
 }
 .stopwatch-display { align-items: flex-end; }
@@ -2729,24 +2740,126 @@ body[data-layout="vertical"] .countdown-display {
 .day-chip:hover:not([aria-pressed="true"]) { color: var(--text); background: var(--fill-strong); }
 .day-chip[aria-pressed="true"] { background: var(--accent-fill); color: #ffffff; }
 
-/* --- Fullscreen & Responsive Overrides --- */
+/* --- Fullscreen & Responsive Overrides (1:1 aflipclock.com) --- */
+body.fullscreen-active {
+  overflow-x: hidden;
+}
+
 body.fullscreen-active .app-header,
 body.fullscreen-active .app-nav-dock,
 body.fullscreen-active .page-panels,
 body.fullscreen-active .info-article,
 body.fullscreen-active .app-footer,
-body.fullscreen-active .hide-in-fullscreen {
+body.fullscreen-active .hide-in-fullscreen,
+body.fullscreen-active .place-meta,
+body.fullscreen-active .title-action {
   display: none !important;
 }
 
-body.fullscreen-active main { padding-top: 0; }
-body.fullscreen-active .page-content-wrapper { min-height: 100vh; padding: 32px; }
+body.fullscreen-active main {
+  padding-top: 0;
+}
+
+body.fullscreen-active .page-content-wrapper {
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: 32px;
+}
+
 body.fullscreen-active #clock-page,
-body.fullscreen-active #alarm-page { --fit: min((100vw - 96px) / 584, (var(--vh100) - 96px) / 340); }
-body.fullscreen-active #pomodoro-page { --fit: min((100vw - 96px) / 506, (var(--vh100) - 240px + 3 * (32px - var(--stage-gap))) / 280); }
-body.fullscreen-active #timer-page { --fit: min((100vw - 96px) / 618, (var(--vh100) - 200px + 2 * (32px - var(--stage-gap))) / 220); }
-body.fullscreen-active #stopwatch-page { --fit: min((100vw - 96px) / 722, (var(--vh100) - 200px + 1 * (32px - var(--stage-gap))) / 220); }
-body.fullscreen-active #countdown-page { --fit: min((100vw - 96px) / 704, (var(--vh100) - 260px + 2 * (32px - var(--stage-gap))) / 206); }
+body.fullscreen-active #alarm-page {
+  --fit: min((100vw - 96px) / 584, (var(--vh100) - 96px) / 340);
+}
+
+body.fullscreen-active #clock-page.with-heading {
+  --fit: min((100vw - 96px) / 584, (var(--vh100) - 168px) / 340);
+}
+
+body.fullscreen-active[data-layout="vertical"] #clock-page,
+body.fullscreen-active[data-layout="vertical"] #alarm-page {
+  --fit: min((100vw - 48px) / 280, (var(--vh100) - 64px) / 696);
+}
+
+body.fullscreen-active[data-layout="vertical"] #clock-page.with-heading {
+  --fit: min((100vw - 48px) / 280, (var(--vh100) - 128px) / 696);
+}
+
+@media (max-width: 599px), (orientation: portrait) and (max-width: 1100px) {
+  body.fullscreen-active:not([data-layout="horizontal"]) #clock-page {
+    --fit: min((100vw - 48px) / 280, (var(--vh100) - 64px) / 696);
+  }
+  body.fullscreen-active:not([data-layout="horizontal"]) #clock-page.with-heading {
+    --fit: min((100vw - 48px) / 280, (var(--vh100) - 128px) / 696);
+  }
+}
+
+body.fullscreen-active #pomodoro-page {
+  --fit: min((100vw - 96px) / 506, (var(--vh100) - 240px + 3 * (32px - var(--stage-gap))) / 280);
+}
+
+body.fullscreen-active[data-layout="vertical"] #pomodoro-page {
+  --fit: min((100vw - 48px) / 230, (var(--vh100) - 200px) / 600);
+}
+
+body.fullscreen-active #timer-page {
+  --fit: min((100vw - 96px) / 618, (var(--vh100) - 200px + 2 * (32px - var(--stage-gap))) / 220);
+}
+
+body.fullscreen-active[data-layout="vertical"] #timer-page {
+  --fit: min((100vw - 48px) / 180, (var(--vh100) - 160px) / 740);
+}
+
+body.fullscreen-active #stopwatch-page {
+  --fit: min((100vw - 96px) / 722, (var(--vh100) - 200px + 1 * (32px - var(--stage-gap))) / 220);
+  margin-top: max(0px, calc((var(--vh100) - 64px - var(--display-h) * var(--u) - var(--stage-gap) - 56px) / 2));
+}
+
+body.fullscreen-active[data-layout="vertical"] #stopwatch-page {
+  --fit: min((100vw - 48px) / 180, (var(--vh100) - 160px) / 864);
+}
+
+body.fullscreen-active #countdown-page {
+  --fit: min((100vw - 96px) / 704, (var(--vh100) - 260px + 2 * (32px - var(--stage-gap))) / 206);
+}
+
+body.fullscreen-active[data-layout="vertical"] #countdown-page {
+  --fit: min((100vw - 48px) / 372, (var(--vh100) - 200px) / 436);
+}
+
+.fullscreen-exit-fab {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top, 0px));
+  inset-inline-end: max(20px, env(safe-area-inset-right, 0px));
+  z-index: 160;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--text-2);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s ease, background-color 0.2s ease, color 0.2s ease, transform 0.15s var(--ease-out);
+}
+
+.fullscreen-exit-fab.visible,
+.fullscreen-exit-fab:focus-visible {
+  opacity: 0.72;
+  pointer-events: auto;
+}
+
+.fullscreen-exit-fab:hover {
+  opacity: 1;
+  background: var(--fill-strong);
+  color: var(--text);
+}
+
+.fullscreen-exit-fab:active {
+  transform: scale(0.9);
+}
 
 @media (max-height: 820px) {
   :root { --stage-gap: 20px; }

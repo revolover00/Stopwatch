@@ -69,6 +69,13 @@ const PANEL_GRID_SLUGS = [
 
 const DEFAULT_SAVED_SLUGS = ['los-angeles', 'new-york', 'london', 'dubai', 'tokyo', 'sydney'];
 const SAVED_CITIES_KEY = 'splitflap_world_cities_v2';
+const WORLD_VIEW_STATE_KEY = 'splitflap_world_view_v2';
+
+interface WorldViewState {
+  selectedSlug: string;
+  planning: boolean;
+  planMinutes: number;
+}
 
 const MINUTES_LINKS = [5, 10, 15, 20, 25, 30, 45, 60];
 const HOURS_LINKS = [1, 2, 3, 4, 5, 6, 8, 12, 24, 48];
@@ -191,13 +198,25 @@ export const ClockPage: React.FC<ClockPageProps> = ({
     else setInternalWorldMode(val);
   };
 
-  const [selectedSlug, setSelectedSlug] = useState<string>('local');
+  const initialWorldState = useMemo(
+    () =>
+      readStorage<WorldViewState>(WORLD_VIEW_STATE_KEY, {
+        selectedSlug: 'local',
+        planning: false,
+        planMinutes: 0,
+      }),
+    []
+  );
+
+  const [selectedSlug, setSelectedSlug] = useState<string>(initialWorldState.selectedSlug || 'local');
   const [savedSlugs, setSavedSlugs] = useState<string[]>(() =>
     readStorage<string[]>(SAVED_CITIES_KEY, DEFAULT_SAVED_SLUGS)
   );
   const [editingCities, setEditingCities] = useState(false);
-  const [planning, setPlanning] = useState(false);
-  const [planMinutes, setPlanMinutes] = useState(0); // -1440 to +1440 in 15m steps
+  const [planning, setPlanning] = useState(Boolean(initialWorldState.planning));
+  const [planMinutes, setPlanMinutes] = useState(
+    typeof initialWorldState.planMinutes === 'number' ? initialWorldState.planMinutes : 0
+  ); // -1440 to +1440 in 15m steps
   const [cityModalOpen, setCityModalOpen] = useState(false);
   const [cityQuery, setCityQuery] = useState('');
 
@@ -210,6 +229,14 @@ export const ClockPage: React.FC<ClockPageProps> = ({
   useEffect(() => {
     writeStorage(SAVED_CITIES_KEY, savedSlugs);
   }, [savedSlugs]);
+
+  useEffect(() => {
+    writeStorage<WorldViewState>(WORLD_VIEW_STATE_KEY, {
+      selectedSlug,
+      planning,
+      planMinutes,
+    });
+  }, [selectedSlug, planning, planMinutes]);
 
   useEffect(() => {
     let timerId: number;
@@ -356,7 +383,7 @@ export const ClockPage: React.FC<ClockPageProps> = ({
           className={`page-container ${isWorldMode ? 'with-heading with-cities' : ''}`.trim()}
         >
           {isWorldMode && headingMeta ? (
-            <div className="place-heading hide-in-fullscreen">
+            <div className="place-heading">
               <div className="place-title-row">
                 <h2 className="place-title">{headingMeta.title}</h2>
                 <button
@@ -409,7 +436,7 @@ export const ClockPage: React.FC<ClockPageProps> = ({
           {/* Interactive World Clock Chips + Time Planner */}
           {isWorldMode ? (
             <>
-              <ul className="world-cities" aria-label={t.worldClock}>
+              <ul className="world-cities hide-in-fullscreen" aria-label={t.worldClock}>
                 <li>
                   <button
                     type="button"

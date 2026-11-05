@@ -12,6 +12,7 @@ interface CountdownPageProps {
 }
 
 const COUNTDOWN_STORAGE_KEY = 'splitflap_countdown_v2';
+const COUNTDOWN_PRESET_KEY = 'splitflap_countdown_preset_v2';
 
 function nextOccurrence(month1Based: number, day: number, hour = 0, minute = 0): Date {
   const now = new Date();
@@ -57,7 +58,9 @@ export const CountdownPage: React.FC<CountdownPageProps> = ({
     readStorage<CountdownEventTarget>(COUNTDOWN_STORAGE_KEY, defaultNewYearTarget())
   );
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
-  const [activePresetLabel, setActivePresetLabel] = useState<string>('New Year');
+  const [activePresetLabel, setActivePresetLabel] = useState<string>(() =>
+    readStorage<string>(COUNTDOWN_PRESET_KEY, 'New Year')
+  );
 
   const initialDate = useMemo(() => new Date(target.targetISO), [target.targetISO]);
   const [dateVal, setDateVal] = useState<string>(() => toDateInputValue(initialDate));
@@ -69,6 +72,10 @@ export const CountdownPage: React.FC<CountdownPageProps> = ({
   useEffect(() => {
     writeStorage(COUNTDOWN_STORAGE_KEY, target);
   }, [target]);
+
+  useEffect(() => {
+    writeStorage(COUNTDOWN_PRESET_KEY, activePresetLabel);
+  }, [activePresetLabel]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -121,6 +128,13 @@ export const CountdownPage: React.FC<CountdownPageProps> = ({
   const hoursNum = Math.floor((diffSec % 86400) / 3600);
   const minsNum = Math.floor((diffSec % 3600) / 60);
   const secsNum = diffSec % 60;
+
+  useEffect(() => {
+    document.body.classList.toggle('countdown-done', diffSec === 0);
+    return () => {
+      document.body.classList.remove('countdown-done');
+    };
+  }, [diffSec]);
 
   const daysStr = daysNum > 99 ? String(daysNum) : String(daysNum).padStart(2, '0');
   const hoursStr = String(hoursNum).padStart(2, '0');
