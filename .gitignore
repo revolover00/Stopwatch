@@ -1,0 +1,11 @@
+node_modules
+.cache
+dist
+dist-single
+*.tsbuildinfo
+.DS_Store
+*.local
+preview.html
+project.zip
+PLAN.md
+STATUS.md
