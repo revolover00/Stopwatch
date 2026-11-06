@@ -1,21 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  BarChart3,
-  BookOpen,
-  CheckCircle2,
-  Coffee,
-  Pause,
-  Play,
-  Plus,
-  RotateCcw,
-  SkipForward,
-  Sparkles,
-  Target,
-  Timer,
-  Trash2,
-  X,
-} from 'lucide-react';
 import { FlipCard, FlipColon } from '../components/FlipCard';
+import { Icon } from '../components/Icon';
 import type { AppSettings, StudySessionRecord, StudyTask } from '../types';
 import {
   playFocusTick,
@@ -33,9 +18,10 @@ interface StudyPageProps {
 type SessionMode = 'work' | 'shortBreak' | 'longBreak';
 type StatsRange = '7' | '30' | 'year';
 
-const TASKS_STORAGE_KEY = 'splitflap_study_tasks_v2';
-const HISTORY_STORAGE_KEY = 'splitflap_study_history_v2';
-const STUDY_STATE_KEY = 'splitflap_study_state_v2';
+const TASKS_STORAGE_KEY = 'splitdeck:v1:study:tasks';
+const HISTORY_STORAGE_KEY = 'splitdeck:v1:study:history';
+const TASKS_BY_DAY_KEY = 'splitdeck:v1:study:tasks-by-day';
+const STUDY_STATE_KEY = 'splitdeck:v1:study:state';
 const MAX_ESTIMATE = 10;
 
 interface PersistedStudyState {
@@ -150,6 +136,9 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
   const [tasks, setTasks] = useState<StudyTask[]>(() =>
     readStorage<StudyTask[]>(TASKS_STORAGE_KEY, [])
   );
+  const [tasksByDay, setTasksByDay] = useState<Record<string, number>>(() =>
+    readStorage<Record<string, number>>(TASKS_BY_DAY_KEY, {})
+  );
   const [activeTaskId, setActiveTaskId] = useState<string | null>(initialStudy.activeTaskId);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskEst, setNewTaskEst] = useState(1);
@@ -160,6 +149,7 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
   const [statsOpen, setStatsOpen] = useState(false);
   const [statsRange, setStatsRange] = useState<StatsRange>('7');
   const [confirmClear, setConfirmClear] = useState(false);
+  const clearConfirmTimerRef = useRef<number | null>(null);
 
   const runningRef = useRef(running);
   runningRef.current = running;
@@ -171,6 +161,14 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
     shortBreak: settings.studyShortBreakMin,
     longBreak: settings.studyLongBreakMin,
   });
+
+  const recordTaskDelta = useCallback((delta: 1 | -1) => {
+    const key = todayKey();
+    setTasksByDay((prev) => {
+      const nextCount = Math.max(0, (prev[key] || 0) + delta);
+      return { ...prev, [key]: nextCount };
+    });
+  }, []);
 
   const persistStudyState = useCallback(
     (
@@ -200,8 +198,20 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
   }, [tasks]);
 
   useEffect(() => {
+    writeStorage(TASKS_BY_DAY_KEY, tasksByDay);
+  }, [tasksByDay]);
+
+  useEffect(() => {
     writeStorage(HISTORY_STORAGE_KEY, history);
   }, [history]);
+
+  useEffect(() => {
+    return () => {
+      if (clearConfirmTimerRef.current !== null) {
+        window.clearTimeout(clearConfirmTimerRef.current);
+      }
+    };
+  }, []);
 
   // Persist activeTaskId updates immediately
   useEffect(() => {
@@ -224,7 +234,7 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
     };
   }, [mode]);
 
-  // Only update idle duration when user changes work/shortBreak/longBreak settings in SettingsDrawer
+  // Update idle duration when user changes work/shortBreak/longBreak settings in SettingsDrawer
   useEffect(() => {
     const prev = prevDurationsRef.current;
     const changed =
@@ -279,10 +289,13 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
           if (activeTaskId) {
             setTasks((prev) =>
               prev.map((tk) => {
-                if (tk.id !== activeTaskId) return tk;
+                if (tk.id !== activeTaskId || tk.done) return tk;
                 const nextDoneCount = tk.completedSessions + 1;
                 const autoDone =
                   settings.studyAutoCheckTask && nextDoneCount >= tk.estSessions ? true : tk.done;
+                if (autoDone && !tk.done) {
+                  recordTaskDelta(1);
+                }
                 return { ...tk, completedSessions: nextDoneCount, done: autoDone };
               })
             );
@@ -358,6 +371,7 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
       durationForMode,
       onShowToast,
       persistStudyState,
+      recordTaskDelta,
       t.longBreak,
       t.shortBreak,
       t.headerStudy,
@@ -433,9 +447,19 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (statsOpen) return;
+      if (statsOpen) {
+        if (e.key === 'Escape') setStatsOpen(false);
+        return;
+      }
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        document.body.classList.contains('settings-open')
+      ) {
+        return;
+      }
       if (e.code === 'Space' && !e.repeat) {
         e.preventDefault();
         toggleStudyRunning();
@@ -451,16 +475,20 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
   const secsStr = String(secondsLeft % 60).padStart(2, '0');
   const isPausedMidSession = !running && secondsLeft < totalSec;
 
+  const currentSessionLabel =
+    mode === 'work' ? t.workSession : mode === 'shortBreak' ? t.shortBreak : t.longBreak;
+
+  // Reflect the active focus or break phase in the browser tab title.
   useEffect(() => {
     if (running || isPausedMidSession) {
-      document.title = `${minsStr}:${secsStr} · ${t.headerStudy}`;
+      document.title = `${minsStr}:${secsStr} · ${currentSessionLabel}`;
     } else {
-      document.title = `${t.headerStudy} — Flip Clock`;
+      document.title = t.headerStudy;
     }
     return () => {
-      document.title = 'Flip Clock';
+      document.title = t.headerClock;
     };
-  }, [running, isPausedMidSession, minsStr, secsStr, t.headerStudy]);
+  }, [running, isPausedMidSession, minsStr, secsStr, currentSessionLabel, t.headerStudy, t.headerClock]);
 
   const handleSelectMode = (next: SessionMode) => {
     if (running) return;
@@ -526,7 +554,7 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
   }, [history]);
 
   const last7Bars = useMemo(() => {
-    const out: { label: string; count: number; isToday: boolean; reached: boolean }[] = [];
+    const out: { label: string; count: number; isToday: boolean; reached: boolean; title: string }[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
@@ -537,6 +565,7 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
         count,
         isToday: i === 0,
         reached: count >= settings.studyDailyGoal,
+        title: `${key}: ${count}`,
       });
     }
     return out;
@@ -544,7 +573,7 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
 
   const maxWeekBar = Math.max(settings.studyDailyGoal, 1, ...last7Bars.map((b) => b.count));
 
-  // Modal chart & metrics for 7d / 30d / 12m
+  // Build session summaries for the selected reporting range.
   const modalStats = useMemo(() => {
     const numDays = statsRange === 'year' ? 365 : Number(statsRange);
     const dayList = Array.from({ length: numDays }, (_, idx) => {
@@ -557,11 +586,16 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
         key,
         sessions: recs.length,
         minutes: recs.reduce((s, r) => s + r.minutes, 0),
+        tasksDone: tasksByDay[key] || 0,
       };
     });
 
     const totalSess = dayList.reduce((s, d) => s + d.sessions, 0);
     const totalMin = dayList.reduce((s, d) => s + d.minutes, 0);
+    const rangeTasksDone = dayList.reduce((s, d) => s + d.tasksDone, 0);
+    const fallbackTasksDone = tasks.filter((tk) => tk.done).length;
+    const tasksDoneTotal = Math.max(rangeTasksDone, fallbackTasksDone);
+
     const nonEmptyIndex = dayList.findIndex((d) => d.sessions > 0);
     const spanDays = nonEmptyIndex >= 0 ? dayList.length - nonEmptyIndex : 1;
     const avgMin = Math.round(totalMin / Math.max(1, spanDays));
@@ -579,7 +613,13 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
       }
     }
 
-    let chartBars: { label: string; count: number; isToday: boolean; reached: boolean }[] = [];
+    let chartBars: {
+      label: string;
+      count: number;
+      isToday: boolean;
+      reached: boolean;
+      title: string;
+    }[] = [];
     if (statsRange === 'year') {
       const now = new Date();
       chartBars = Array.from({ length: 12 }, (_, i) => {
@@ -596,6 +636,10 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
           count,
           isToday: i === 11,
           reached: false,
+          title: `${new Intl.DateTimeFormat(langMeta.bcp47, {
+            month: 'long',
+            year: 'numeric',
+          }).format(mDate)}: ${count}`,
         };
       });
     } else {
@@ -609,6 +653,7 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
         count: d.sessions,
         isToday: idx === dayList.length - 1,
         reached: d.sessions >= settings.studyDailyGoal,
+        title: `${d.key}: ${d.sessions}`,
       }));
     }
 
@@ -618,12 +663,16 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
       avgMin,
       bestSessions: best ? String(best.sessions) : '–',
       bestDate: best
-        ? `· ${new Intl.DateTimeFormat(`${langMeta.bcp47}-u-nu-latn`, { month: 'short', day: 'numeric' }).format(best.date)}`
+        ? `· ${new Intl.DateTimeFormat(`${langMeta.bcp47}-u-nu-latn`, {
+            month: 'short',
+            day: 'numeric',
+          }).format(best.date)}`
         : '',
       longest,
+      tasksDoneTotal,
       chartBars,
     };
-  }, [history, statsRange, settings.studyDailyGoal, langMeta.bcp47]);
+  }, [history, tasksByDay, tasks, statsRange, settings.studyDailyGoal, langMeta.bcp47]);
 
   const modalMaxBar = Math.max(
     statsRange === 'year' ? 1 : settings.studyDailyGoal,
@@ -631,7 +680,7 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
     ...modalStats.chartBars.map((b) => b.count)
   );
 
-  // Tasks summary ("1 of 4 sessions · Finish at 5:35 PM")
+  // Tasks summary ("3 of 8 sessions · Finish at 4:40 PM")
   const tasksSummaryText = useMemo(() => {
     const open = tasks.filter((t) => !t.done);
     const totalEst = open.reduce((sum, t) => sum + (t.estSessions || 1), 0);
@@ -665,15 +714,7 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
       .replace('{done}', String(totalDone))
       .replace('{total}', String(totalEst))
       .replace('{time}', finishStr);
-  }, [
-    tasks,
-    settings,
-    mode,
-    totalSec,
-    secondsLeft,
-    cycleCompleted,
-    t.tasksSummaryTemplate,
-  ]);
+  }, [tasks, settings, mode, totalSec, secondsLeft, cycleCompleted, t.tasksSummaryTemplate]);
 
   const focusedTask = useMemo(
     () => tasks.find((t) => t.id === activeTaskId && !t.done) ?? null,
@@ -687,34 +728,41 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
       ? settings.studySessionsBeforeLong
       : cycleCompleted % settings.studySessionsBeforeLong;
 
+  // Export study history as a compact, spreadsheet-friendly CSV.
   const exportCsv = () => {
-    const header = 'date,sessions,focus_minutes\n';
-    const byDay: Record<string, { s: number; m: number }> = {};
+    const header = 'date,sessions,focus_minutes,tasks_completed\n';
+    const byDay: Record<string, { s: number; m: number; t: number }> = {};
     for (const r of history) {
-      byDay[r.dateISO] ??= { s: 0, m: 0 };
+      byDay[r.dateISO] ??= { s: 0, m: 0, t: tasksByDay[r.dateISO] || 0 };
       byDay[r.dateISO].s += 1;
       byDay[r.dateISO].m += r.minutes;
     }
+    for (const [day, count] of Object.entries(tasksByDay)) {
+      if (count > 0) {
+        byDay[day] ??= { s: 0, m: 0, t: 0 };
+        byDay[day].t = count;
+      }
+    }
     const rows = Object.keys(byDay)
       .sort()
-      .map((k) => `${k},${byDay[k].s},${byDay[k].m}`)
+      .map((k) => `${k},${byDay[k].s},${byDay[k].m},${byDay[k].t}`)
       .join('\n');
-    const blob = new Blob([header + rows + '\n'], { type: 'text/csv' });
+    const blob = new Blob([header + (rows ? rows + '\n' : '')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `study-history-${todayISO}.csv`;
     a.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   return (
     <>
-      <div className="page-content-wrapper glow-stage">
-        <div id="pomodoro-page" className="page-container">
+      <div className="sd-page-content-wrapper sd-glow-stage">
+        <div id="pomodoro-page" className="sd-page-container">
           {/* Segmented Session Selector */}
           <div
-            className="segmented session-type-selector hide-in-fullscreen"
+            className="segmented sd-session-type-selector sd-hide-in-fullscreen"
             role="group"
             aria-label="Study session mode"
           >
@@ -723,9 +771,9 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
               disabled={running}
               onClick={() => handleSelectMode('work')}
               aria-pressed={mode === 'work'}
-              className={`session-selector-btn ${mode === 'work' ? 'active' : ''}`.trim()}
+              className={`sd-session-selector-btn ${mode === 'work' ? 'active' : ''}`.trim()}
             >
-              <BookOpen className="session-icon w-[16px] h-[16px]" />
+              <Icon name="menu_book" />
               <span>{t.workTab}</span>
             </button>
             <button
@@ -733,9 +781,9 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
               disabled={running}
               onClick={() => handleSelectMode('shortBreak')}
               aria-pressed={mode === 'shortBreak'}
-              className={`session-selector-btn ${mode === 'shortBreak' ? 'active' : ''}`.trim()}
+              className={`sd-session-selector-btn ${mode === 'shortBreak' ? 'active' : ''}`.trim()}
             >
-              <Coffee className="session-icon w-[16px] h-[16px]" />
+              <Icon name="coffee" />
               <span>{t.shortBreak}</span>
             </button>
             <button
@@ -743,21 +791,19 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
               disabled={running}
               onClick={() => handleSelectMode('longBreak')}
               aria-pressed={mode === 'longBreak'}
-              className={`session-selector-btn ${mode === 'longBreak' ? 'active' : ''}`.trim()}
+              className={`sd-session-selector-btn ${mode === 'longBreak' ? 'active' : ''}`.trim()}
             >
-              <Sparkles className="session-icon w-[16px] h-[16px]" />
+              <Icon name="self_improvement" />
               <span>{t.longBreak}</span>
             </button>
           </div>
 
-          <span className="sr-only">
-            {mode === 'work' ? 'Work Session' : mode === 'shortBreak' ? 'Short Break' : 'Long Break'}
-          </span>
+          <span className="sd-sr-only">{currentSessionLabel}</span>
 
           {/* Flip Display with Red / Green / Blue Session Glow */}
-          <div className="pomodoro-face">
+          <div className="sd-pomodoro-face">
             <div
-              className="flip-display"
+              className="sd-flip-display"
               role="timer"
               aria-label={`${minsStr} minutes ${secsStr} seconds`}
             >
@@ -766,16 +812,16 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
               <FlipCard value={secsStr} srLabel={`${secsStr} Seconds`} />
             </div>
 
-            <div className="session-meta">
-              <div className="session-progress" aria-hidden="true">
+            <div className="sd-session-meta">
+              <div className="sd-session-progress" aria-hidden="true">
                 <div
-                  className="session-progress-bar"
+                  className="sd-session-progress-bar"
                   style={{ transform: `scaleX(${progress})` }}
                 />
               </div>
 
               <div
-                className="session-count"
+                className="sd-session-count"
                 aria-label={`Completed ${doneInCycle} of ${settings.studySessionsBeforeLong} sessions`}
               >
                 {Array.from({ length: settings.studySessionsBeforeLong }).map((_, idx) => {
@@ -791,51 +837,46 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
             </div>
           </div>
 
-          {/* Controls: Reset Icon + Session-Colored Start/Pause Pill + Skip Icon (remain visible in Fullscreen per aflipclock.com) */}
+          {/* Controls: Reset Icon + Session-Colored Width-Stable Start/Pause Pill + Skip Icon */}
           <div className="controls">
             <button
               type="button"
               onClick={handleResetCycle}
               disabled={!running && !isPausedMidSession && cycleCompleted === 0 && mode === 'work'}
-              className="btn btn-lg btn-secondary btn-icon"
+              className="btn sd-btn-lg sd-btn-secondary sd-btn-icon"
               aria-label={t.reset}
               title={t.reset}
             >
-              <RotateCcw className="w-[20px] h-[20px]" />
+              <Icon name="refresh" />
             </button>
 
             <button
               id="pomodoro-start-pause-btn"
               type="button"
               onClick={toggleStudyRunning}
-              className="btn btn-lg btn-primary"
+              className="btn sd-btn-lg sd-btn-primary"
             >
-              {running ? (
-                <>
-                  <Pause className="w-[20px] h-[20px]" />
-                  <span>{t.pause}</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-[20px] h-[20px]" />
-                  <span>{isPausedMidSession ? t.resume : t.start}</span>
-                </>
-              )}
+              <Icon name={running ? 'pause' : 'play_arrow'} />
+              <span className="sd-btn-labels">
+                <span className={!running && !isPausedMidSession ? 'on' : ''}>{t.start}</span>
+                <span className={running ? 'on' : ''}>{t.pause}</span>
+                <span className={!running && isPausedMidSession ? 'on' : ''}>{t.resume}</span>
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => advanceSession(false)}
-              className="btn btn-lg btn-secondary btn-icon"
+              className="btn sd-btn-lg sd-btn-secondary sd-btn-icon"
               aria-label={t.skip}
               title={t.skip}
             >
-              <SkipForward className="w-[20px] h-[20px]" />
+              <Icon name="skip_next" />
             </button>
           </div>
 
           {/* Status Pills */}
-          <div className="pomodoro-status hide-in-fullscreen">
+          <div className="sd-pomodoro-status sd-hide-in-fullscreen">
             {focusedTask ? (
               <a
                 href="#tasks-panel"
@@ -843,12 +884,9 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
                   e.preventDefault();
                   document.getElementById('tasks-panel')?.scrollIntoView({ behavior: 'smooth' });
                 }}
-                className="focus-task"
+                className="sd-focus-task"
               >
-                <Target
-                  className="w-[17px] h-[17px] shrink-0"
-                  style={{ color: 'var(--session-color)' }}
-                />
+                <Icon name="target" />
                 <span>
                   {focusedTask.title} · {focusedTask.completedSessions}/{focusedTask.estSessions}
                 </span>
@@ -861,12 +899,9 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
                 setConfirmClear(false);
                 setStatsOpen(true);
               }}
-              className="session-stats"
+              className="sd-session-stats"
             >
-              <CheckCircle2
-                className="w-[16px] h-[16px]"
-                style={{ color: 'var(--session-color)' }}
-              />
+              <Icon name="check_circle" />
               <span>
                 {t.todayStatsTemplate
                   .replace('{s}', String(todaySessions))
@@ -878,25 +913,25 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
       </div>
 
       {/* Two-Column Panels Below Stage: Tasks & Progress */}
-      <div className="page-panels two-col">
+      <div className="sd-page-panels two-col">
         {/* Tasks Panel */}
         <section id="tasks-panel" className="panel" aria-labelledby="tasks-heading">
-          <div className="panel-header">
-            <h2 id="tasks-heading" className="panel-title">
+          <div className="sd-panel-header">
+            <h2 id="tasks-heading" className="sd-panel-title">
               {t.tasksTitle}
             </h2>
             {tasks.some((tk) => tk.done) ? (
               <button
                 type="button"
                 onClick={() => setTasks((prev) => prev.filter((tk) => !tk.done))}
-                className="text-button"
+                className="sd-text-button"
               >
                 <span>{t.clearCompleted}</span>
               </button>
             ) : null}
           </div>
 
-          <form onSubmit={handleAddTask} className="task-input-row">
+          <form onSubmit={handleAddTask} className="sd-task-input-row">
             <input
               type="text"
               value={newTaskTitle}
@@ -908,36 +943,36 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
             <button
               type="button"
               onClick={() => setNewTaskEst((n) => (n >= MAX_ESTIMATE ? 1 : n + 1))}
-              className="estimate-button"
+              className="sd-estimate-button"
               title="Estimated sessions (click to increase)"
               aria-label={`${newTaskEst} estimated sessions`}
             >
-              <Timer className="w-[16px] h-[16px]" />
+              <Icon name="timer" />
               <span>{newTaskEst}</span>
             </button>
             <button
               type="submit"
-              className="btn btn-icon btn-primary"
+              className="btn sd-btn-icon sd-btn-primary"
               aria-label="Add task"
               title="Add task"
             >
-              <Plus className="w-[20px] h-[20px]" />
+              <Icon name="add" />
             </button>
           </form>
 
           {tasks.length === 0 ? (
-            <p id="no-tasks-message" className="empty-state">
+            <p id="no-tasks-message" className="sd-empty-state">
               {t.noTasksMessage}
             </p>
           ) : (
-            <ul className="tasks-list">
+            <ul className="sd-tasks-list">
               {tasks.map((task) => {
                 const isActive = activeTaskId === task.id && !task.done;
                 const met = task.completedSessions >= task.estSessions;
                 return (
                   <li
                     key={task.id}
-                    className={`task-item ${task.done ? 'completed' : ''} ${
+                    className={`sd-task-item ${task.done ? 'completed' : ''} ${
                       isActive ? 'active' : ''
                     }`.trim()}
                   >
@@ -946,40 +981,42 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
                       checked={task.done}
                       aria-label={task.title}
                       onChange={() => {
+                        const willBeDone = !task.done;
+                        recordTaskDelta(willBeDone ? 1 : -1);
                         setTasks((prev) => {
-                          const next = prev.map((t) =>
-                            t.id === task.id ? { ...t, done: !t.done } : t
+                          const next = prev.map((tk) =>
+                            tk.id === task.id ? { ...tk, done: willBeDone } : tk
                           );
-                          if (next.length > 0 && next.every((t) => t.done)) {
-                            onShowToast?.('All tasks completed!');
+                          if (willBeDone && next.length > 0 && next.every((tk) => tk.done)) {
+                            onShowToast?.(isAr ? 'اكتملت جميع المهام!' : 'All tasks completed!');
                           }
                           return next;
                         });
                       }}
                       className="check"
                     />
-                    <span className="task-text">{task.title}</span>
+                    <span className="sd-task-text">{task.title}</span>
                     <button
                       type="button"
                       onClick={() =>
                         setTasks((prev) =>
-                          prev.map((t) =>
-                            t.id === task.id
+                          prev.map((tk) =>
+                            tk.id === task.id
                               ? {
-                                  ...t,
+                                  ...tk,
                                   estSessions:
-                                    t.estSessions >= MAX_ESTIMATE
-                                      ? Math.max(1, t.completedSessions)
-                                      : t.estSessions + 1,
+                                    tk.estSessions >= MAX_ESTIMATE
+                                      ? Math.max(1, tk.completedSessions)
+                                      : tk.estSessions + 1,
                                 }
-                              : t
+                              : tk
                           )
                         )
                       }
-                      className={`estimate-button ${met ? 'met' : ''}`.trim()}
+                      className={`sd-estimate-button ${met ? 'met' : ''}`.trim()}
                       aria-label={`Sessions: ${task.completedSessions} of ${task.estSessions} estimated`}
                     >
-                      <Timer className="w-[14px] h-[14px]" />
+                      <Icon name="timer" />
                       <span>
                         {task.completedSessions}/{task.estSessions}
                       </span>
@@ -990,24 +1027,20 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
                       aria-label={isActive ? 'Unset as focus task' : 'Set as focus task'}
                       title={isActive ? 'Unfocus task' : 'Set as focus task'}
                       onClick={() => setActiveTaskId(isActive ? null : task.id)}
-                      className="task-btn focus-btn"
+                      className="sd-task-btn sd-focus-btn"
                     >
-                      {isActive ? (
-                        <X className="w-[17px] h-[17px]" />
-                      ) : (
-                        <Target className="w-[17px] h-[17px]" />
-                      )}
+                      <Icon name={isActive ? 'cancel' : 'target'} />
                     </button>
                     <button
                       type="button"
                       onClick={() => {
-                        setTasks((prev) => prev.filter((t) => t.id !== task.id));
+                        setTasks((prev) => prev.filter((tk) => tk.id !== task.id));
                         if (activeTaskId === task.id) setActiveTaskId(null);
                       }}
-                      className="task-btn delete-btn"
+                      className="sd-task-btn sd-delete-btn"
                       aria-label="Delete task"
                     >
-                      <Trash2 className="w-[17px] h-[17px]" />
+                      <Icon name="delete" />
                     </button>
                   </li>
                 );
@@ -1015,13 +1048,13 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
             </ul>
           )}
 
-          {tasksSummaryText ? <div className="tasks-summary">{tasksSummaryText}</div> : null}
+          {tasksSummaryText ? <div className="sd-tasks-summary">{tasksSummaryText}</div> : null}
         </section>
 
         {/* Progress Panel */}
         <section id="progress-panel" className="panel" aria-labelledby="progress-heading">
-          <div className="panel-header">
-            <h2 id="progress-heading" className="panel-title">
+          <div className="sd-panel-header">
+            <h2 id="progress-heading" className="sd-panel-title">
               {t.progressTitle}
             </h2>
             <button
@@ -1030,21 +1063,21 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
                 setConfirmClear(false);
                 setStatsOpen(true);
               }}
-              className="text-button"
+              className="sd-text-button"
             >
-              <BarChart3 className="w-[17px] h-[17px]" />
+              <Icon name="bar_chart" />
               <span>{t.statisticsTitle}</span>
             </button>
           </div>
 
-          <div className="progress-stats">
-            <div className="progress-stat">
-              <span className="progress-value" dir="ltr">
+          <div className="sd-progress-stats">
+            <div className="sd-progress-stat">
+              <span className="sd-progress-value" dir="ltr">
                 {todaySessions}/{settings.studyDailyGoal}
               </span>
-              <span className="progress-label">{t.dailyGoalLabel}</span>
+              <span className="sd-progress-label">{t.dailyGoalLabel}</span>
               <div
-                className={`goal-bar ${
+                className={`sd-goal-bar ${
                   todaySessions >= settings.studyDailyGoal ? 'reached' : ''
                 }`.trim()}
               >
@@ -1056,25 +1089,29 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
               </div>
             </div>
 
-            <div className="progress-stat">
-              <span className="progress-value" dir="ltr">{formatDurationMinutes(todayMinutes)}</span>
-              <span className="progress-label">{t.focusTimeLabel}</span>
+            <div className="sd-progress-stat">
+              <span className="sd-progress-value" dir="ltr">
+                {formatDurationMinutes(todayMinutes)}
+              </span>
+              <span className="sd-progress-label">{t.focusTimeLabel}</span>
             </div>
 
-            <div className="progress-stat">
-              <span className="progress-value" dir="ltr">{streakDays}</span>
-              <span className="progress-label">{t.dayStreakLabel}</span>
+            <div className="sd-progress-stat">
+              <span className="sd-progress-value" dir="ltr">
+                {streakDays}
+              </span>
+              <span className="sd-progress-label">{t.dayStreakLabel}</span>
             </div>
           </div>
 
-          <span className="section-label">{t.last7Days}</span>
+          <span className="sd-section-label">{t.last7Days}</span>
           <div
-            className="week-chart"
+            className="sd-week-chart"
             style={{ '--bars': 7 } as React.CSSProperties}
             aria-label={t.last7Days}
           >
             <span
-              className="week-goal"
+              className="sd-week-goal"
               style={{
                 bottom: `calc(${settings.studyDailyGoal / maxWeekBar} * 96px + 20px)`,
               }}
@@ -1082,91 +1119,123 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
             {last7Bars.map((bar, idx) => (
               <div
                 key={idx}
-                className={`week-bar ${bar.isToday ? 'today' : ''} ${
+                title={bar.title}
+                className={`sd-week-bar ${bar.isToday ? 'today' : ''} ${
                   bar.reached ? 'reached' : ''
                 }`.trim()}
               >
-                <span className="week-bar-value">{bar.count > 0 ? bar.count : ''}</span>
-                <div className="week-bar-track">
+                <span className="sd-week-bar-value">{bar.count > 0 ? bar.count : ''}</span>
+                <div className="sd-week-bar-track">
                   <div
-                    className="week-bar-fill"
+                    className="sd-week-bar-fill"
                     style={{ height: `${(bar.count / maxWeekBar) * 100}%` }}
                   />
                 </div>
-                <span className="week-bar-day">{bar.label}</span>
+                <span className="sd-week-bar-day">{bar.label}</span>
               </div>
             ))}
           </div>
         </section>
       </div>
 
-      {/* Neutral Editorial Guide */}
-      <article className="info-article">
+      {/* Study notes: original guidance written for this application. */}
+      <article className="sd-info-article">
         {isAr ? (
           <>
-            <h2>ما هو مؤقت المذاكرة بتقنية بومودورو؟</h2>
+            <h2>كيف ينظّم مؤقت الدراسة وقتك؟</h2>
             <p>
-              يقسم مؤقت المذاكرة فترات الدراسة والعمل العميق إلى جلسات تركيز محددة تليها استراحات قصيرة
-              لاستعادة النشاط، مع إضاءة محيطية ملونة توضح حالة الجلسة الحالية.
+              حوّل المهمة الكبيرة إلى فترة تركيز محددة، ثم خذ استراحة قبل بدء الجولة التالية. تعرض الساعة
+              الوقت المتبقي وحالة الجلسة، بينما تساعدك قائمة المهام ومؤشرات التقدّم على متابعة خطتك من هذا
+              المتصفح.
             </p>
-            <h2>اختيار إيقاع الجلسات المناسب</h2>
+
+            <h2>إيقاع بسيط بين العمل والراحة</h2>
+            <p>
+              اختر جلسة عمل، وابدأ العدّ، ثم انتقل إلى استراحة قصيرة عند انتهائها. بعد عدد الجلسات الذي
+              تحدده، خذ استراحة أطول. يمكنك إيقاف التشغيل التلقائي إذا كنت تفضّل بدء كل مرحلة بنفسك.
+            </p>
+
+            <h2>اختر مدة تناسب المهمة</h2>
             <ul>
-              <li><strong>كلاسيكي (25-5-15):</strong> 25 دقيقة تركيز، و5 دقائق استراحة قصيرة، و15 دقيقة استراحة طويلة كل 4 جلسات.</li>
-              <li><strong>قصير (15-3-9):</strong> جلسات سريعة مثالية للمراجعة والتمارين المركزة.</li>
-              <li><strong>طويل (50-10-30):</strong> فترات عمل عميق ممتدة للبرمجة والكتابة وحل المسائل.</li>
+              <li><strong>25–5–15:</strong> تركيز لمدة 25 دقيقة، ثم استراحة قصيرة من 5 دقائق.</li>
+              <li><strong>15–3–9:</strong> جولات أقصر للمراجعة أو المهام الصغيرة.</li>
+              <li><strong>50–10–30:</strong> فترة تركيز أطول يتبعها وقت كافٍ للابتعاد عن المكتب.</li>
             </ul>
+
+            <h2>جهّز جلستك قبل البدء</h2>
+            <p>
+              اختر وضع العمل أو الاستراحة، وأضف المهمة التي تريد إنجازها، واضبط هدفك اليومي من الإعدادات.
+              بعد الجلسة يمكنك تسجيل ما أنجزته ومراجعة الإحصاءات أو تنزيل السجل بصيغة CSV.
+            </p>
+
+            <h2>اجعل الاستراحة جزءاً من الخطة</h2>
+            <p>
+              ابتعد عن الشاشة للحظات، حرّك جسمك، أو دوّن الخطوة التالية. وإذا كانت إحدى المدد لا تناسب
+              تركيزك، عدّلها من الإعدادات بدلاً من إجبار نفسك على إيقاع ثابت.
+            </p>
           </>
         ) : (
           <>
-            <h2>What Is a Split-Flap Study Timer?</h2>
+            <h2>Give a study block a clear finish</h2>
             <p>
-              A study timer breaks long study or deep-work stretches into structured focus intervals and
-              recovery breaks. Large split-flap numerals show exact remaining minutes and seconds, while
-              color-coded ambient lighting signals whether you are in a work block or resting.
+              Break a large assignment into a defined stretch of attention, then pause before the next round.
+              The display shows the remaining time and current session; a task list and progress summaries
+              help you keep your plan close at hand in this browser.
             </p>
 
-            <h2>Choosing Your Interval Rhythm</h2>
+            <h2>Build a repeatable work-and-rest cycle</h2>
+            <p>
+              Choose a work session and start the clock. When it ends, move into a short break; after the
+              number of work rounds you set, take a longer one. Automatic transitions are optional, so you
+              can decide when each phase begins.
+            </p>
+
+            <h2>Match the interval to the task</h2>
             <ul>
-              <li>
-                <strong>Classic (25-5-15):</strong> 25 minutes of focused study, a 5-minute short break,
-                and a 15-minute long break every four sessions.
-              </li>
-              <li>
-                <strong>Short (15-3-9):</strong> Compact sprints ideal for quick warm-ups and review
-                drills.
-              </li>
-              <li>
-                <strong>Long (50-10-30):</strong> Extended deep-work blocks for writing, coding, and
-                problem sets.
-              </li>
+              <li><strong>25–5–15:</strong> A 25-minute work block followed by a 5-minute short break.</li>
+              <li><strong>15–3–9:</strong> Smaller rounds for review or a quick, self-contained task.</li>
+              <li><strong>50–10–30:</strong> A longer focus window with a more generous recovery break.</li>
             </ul>
+
+            <h2>Set up before pressing start</h2>
+            <p>
+              Select a work or break mode, add the task you intend to tackle, and set a daily goal in
+              settings. Afterward, log what you completed, review the summaries, or export your history as a
+              CSV file.
+            </p>
+
+            <h2>Give the break its own purpose</h2>
+            <p>
+              Step away from the screen, stretch, or write down the next action. If an interval feels too
+              short or too long, adjust it to suit the work instead of forcing every task into one rhythm.
+            </p>
           </>
         )}
       </article>
 
       {/* Statistics Modal */}
       {statsOpen ? (
-        <div className="modal-overlay" onClick={() => setStatsOpen(false)}>
+        <div className="sd-modal-overlay visible" onClick={() => setStatsOpen(false)}>
           <div
             role="dialog"
             aria-modal="true"
             aria-label={t.statisticsTitle}
-            className="stats-modal-card"
+            className="sd-stats-modal-card"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between gap-3 mb-4">
-              <h2 className="panel-title">{t.statisticsTitle}</h2>
+            <div className="sd-stats-head">
+              <h2 className="sd-panel-title">{t.statisticsTitle}</h2>
               <button
                 type="button"
                 onClick={() => setStatsOpen(false)}
-                className="icon-button"
+                className="sd-icon-button"
                 aria-label="Close statistics"
               >
-                <X className="w-[20px] h-[20px]" />
+                <Icon name="close" />
               </button>
             </div>
 
-            <div className="segmented w-full flex">
+            <div className="segmented sd-stats-range">
               {(
                 [
                   { id: '7', label: t.range7Days },
@@ -1177,55 +1246,66 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
                 <button
                   key={tab.id}
                   type="button"
+                  aria-pressed={statsRange === tab.id}
                   onClick={() => setStatsRange(tab.id)}
-                  className={`flex-1 ${statsRange === tab.id ? 'active' : ''}`.trim()}
+                  className={statsRange === tab.id ? 'active' : ''}
                 >
                   {tab.label}
                 </button>
               ))}
             </div>
 
-            <div className="stats-grid">
-              <div className="progress-stat">
-                <span className="progress-value" dir="ltr">{modalStats.totalSess}</span>
-                <span className="progress-label">{t.sessionsLabel}</span>
+            <div className="sd-stats-grid">
+              <div className="sd-progress-stat">
+                <span className="sd-progress-value" dir="ltr">
+                  {modalStats.totalSess}
+                </span>
+                <span className="sd-progress-label">{t.sessionsLabel}</span>
               </div>
-              <div className="progress-stat">
-                <span className="progress-value" dir="ltr">{formatDurationMinutes(modalStats.totalMin)}</span>
-                <span className="progress-label">{t.focusTimeLabel}</span>
+              <div className="sd-progress-stat">
+                <span className="sd-progress-value" dir="ltr">
+                  {formatDurationMinutes(modalStats.totalMin)}
+                </span>
+                <span className="sd-progress-label">{t.focusTimeLabel}</span>
               </div>
-              <div className="progress-stat">
-                <span className="progress-value" dir="ltr">{formatDurationMinutes(modalStats.avgMin)}</span>
-                <span className="progress-label">{t.dailyAverageLabel}</span>
+              <div className="sd-progress-stat">
+                <span className="sd-progress-value" dir="ltr">
+                  {formatDurationMinutes(modalStats.avgMin)}
+                </span>
+                <span className="sd-progress-label">{t.dailyAverageLabel}</span>
               </div>
-              <div className="progress-stat">
-                <span className="progress-value" dir="ltr">
+              <div className="sd-progress-stat">
+                <span className="sd-progress-value" dir="ltr">
                   {modalStats.bestSessions}{' '}
                   <span className="text-[13px] font-normal" style={{ color: 'var(--text-2)' }}>
                     {modalStats.bestDate}
                   </span>
                 </span>
-                <span className="progress-label">{t.bestDayLabel}</span>
+                <span className="sd-progress-label">{t.bestDayLabel}</span>
               </div>
-              <div className="progress-stat">
-                <span className="progress-value" dir="ltr">{modalStats.longest} {t.days}</span>
-                <span className="progress-label">{t.longestStreakLabel}</span>
+              <div className="sd-progress-stat">
+                <span className="sd-progress-value" dir="ltr">
+                  {modalStats.longest} {t.days}
+                </span>
+                <span className="sd-progress-label">{t.longestStreakLabel}</span>
               </div>
-              <div className="progress-stat">
-                <span className="progress-value" dir="ltr">{tasks.filter((tk) => tk.done).length}</span>
-                <span className="progress-label">{t.tasksDoneLabel}</span>
+              <div className="sd-progress-stat">
+                <span className="sd-progress-value" dir="ltr">
+                  {modalStats.tasksDoneTotal}
+                </span>
+                <span className="sd-progress-label">{t.tasksDoneLabel}</span>
               </div>
             </div>
 
             <div
-              className={`week-chart stats-chart ${
+              className={`sd-week-chart sd-stats-chart ${
                 modalStats.chartBars.length > 12 ? 'dense' : ''
               }`.trim()}
               style={{ '--bars': modalStats.chartBars.length } as React.CSSProperties}
             >
               {statsRange !== 'year' ? (
                 <span
-                  className="week-goal"
+                  className="sd-week-goal"
                   style={{
                     bottom: `calc(${settings.studyDailyGoal / modalMaxBar} * 120px + 20px)`,
                   }}
@@ -1234,41 +1314,51 @@ export const StudyPage: React.FC<StudyPageProps> = ({ settings, onShowToast }) =
               {modalStats.chartBars.map((bar, idx) => (
                 <div
                   key={idx}
-                  className={`week-bar ${bar.isToday ? 'today' : ''} ${
+                  title={bar.title}
+                  className={`sd-week-bar ${bar.isToday ? 'today' : ''} ${
                     bar.reached ? 'reached' : ''
                   }`.trim()}
                 >
-                  <span className="week-bar-value">{bar.count > 0 ? bar.count : ''}</span>
-                  <div className="week-bar-track">
+                  <span className="sd-week-bar-value">{bar.count > 0 ? bar.count : ''}</span>
+                  <div className="sd-week-bar-track">
                     <div
-                      className="week-bar-fill"
+                      className="sd-week-bar-fill"
                       style={{ height: `${(bar.count / modalMaxBar) * 100}%` }}
                     />
                   </div>
-                  <span className="week-bar-day">{bar.label}</span>
+                  <span className="sd-week-bar-day">{bar.label}</span>
                 </div>
               ))}
             </div>
 
-            <p className="stats-note">
-              {t.privacyNote}
-            </p>
+            <p className="sd-stats-note">{t.privacyNote}</p>
 
-            <div className="stats-actions">
-              <button type="button" onClick={exportCsv} className="btn btn-secondary">
-                {t.exportCsv}
+            <div className="sd-stats-actions">
+              <button type="button" onClick={exportCsv} className="btn sd-btn-secondary">
+                <Icon name="download" />
+                <span>{t.exportCsv}</span>
               </button>
               <button
                 type="button"
                 onClick={() => {
                   if (!confirmClear) {
                     setConfirmClear(true);
+                    if (clearConfirmTimerRef.current !== null) {
+                      window.clearTimeout(clearConfirmTimerRef.current);
+                    }
+                    clearConfirmTimerRef.current = window.setTimeout(() => {
+                      setConfirmClear(false);
+                    }, 4000);
                     return;
                   }
+                  if (clearConfirmTimerRef.current !== null) {
+                    window.clearTimeout(clearConfirmTimerRef.current);
+                  }
                   setHistory([]);
+                  setTasksByDay({});
                   setConfirmClear(false);
                 }}
-                className={`text-button danger ${confirmClear ? 'confirm' : ''}`.trim()}
+                className={`sd-text-button danger ${confirmClear ? 'confirm' : ''}`.trim()}
               >
                 {confirmClear ? t.tapAgainToClear : t.clearHistory}
               </button>

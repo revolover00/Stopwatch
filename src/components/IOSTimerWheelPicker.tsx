@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, Clock } from 'lucide-react';
 import {
   WheelPicker,
   WheelPickerWrapper,
@@ -8,6 +7,7 @@ import {
 } from '@ncdai/react-wheel-picker';
 import '@ncdai/react-wheel-picker/style.css';
 import { playWheelClick } from '../utils/soundEngine';
+import { Icon } from './Icon';
 
 interface DurationWheelPickerProps {
   hours: number;
@@ -69,12 +69,12 @@ export const DurationWheelPicker: React.FC<DurationWheelPickerProps> = ({
 }) => {
   return (
     <div
-      className={`ios-wheel-card duration-wheel-card ${disabled ? 'is-disabled' : ''}`.trim()}
+      className={`sd-ios-wheel-card sd-duration-wheel-card ${disabled ? 'is-disabled' : ''}`.trim()}
       dir="ltr"
       aria-disabled={disabled}
     >
-      <WheelPickerWrapper className="ios-wheel-wrapper">
-        <div className="ios-wheel-col is-first">
+      <WheelPickerWrapper className="sd-ios-wheel-wrapper">
+        <div className="sd-ios-wheel-col is-first">
           <WheelPicker<number>
             value={hours}
             options={HOURS_99_OPTIONS}
@@ -87,17 +87,17 @@ export const DurationWheelPicker: React.FC<DurationWheelPickerProps> = ({
               onChange(nextH, minutes, seconds);
             }}
             classNames={{
-              optionItem: 'ios-wheel-option',
-              highlightWrapper: 'ios-wheel-highlight-slot is-left-cap',
-              highlightItem: 'ios-wheel-highlight-item',
+              optionItem: 'sd-ios-wheel-option',
+              highlightWrapper: 'sd-ios-wheel-highlight-slot is-left-cap',
+              highlightItem: 'sd-ios-wheel-highlight-item',
             }}
           />
-          <span className="ios-wheel-unit" aria-hidden="true">
+          <span className="sd-ios-wheel-unit" aria-hidden="true">
             {hoursLabel}
           </span>
         </div>
 
-        <div className="ios-wheel-col is-middle">
+        <div className="sd-ios-wheel-col is-middle">
           <WheelPicker<number>
             value={minutes}
             options={MINUTES_60_OPTIONS}
@@ -110,17 +110,17 @@ export const DurationWheelPicker: React.FC<DurationWheelPickerProps> = ({
               onChange(hours, nextM, seconds);
             }}
             classNames={{
-              optionItem: 'ios-wheel-option',
-              highlightWrapper: 'ios-wheel-highlight-slot',
-              highlightItem: 'ios-wheel-highlight-item',
+              optionItem: 'sd-ios-wheel-option',
+              highlightWrapper: 'sd-ios-wheel-highlight-slot',
+              highlightItem: 'sd-ios-wheel-highlight-item',
             }}
           />
-          <span className="ios-wheel-unit" aria-hidden="true">
+          <span className="sd-ios-wheel-unit" aria-hidden="true">
             {minutesLabel}
           </span>
         </div>
 
-        <div className="ios-wheel-col is-last">
+        <div className="sd-ios-wheel-col is-last">
           <WheelPicker<number>
             value={seconds}
             options={SECONDS_60_OPTIONS}
@@ -133,12 +133,12 @@ export const DurationWheelPicker: React.FC<DurationWheelPickerProps> = ({
               onChange(hours, minutes, nextS);
             }}
             classNames={{
-              optionItem: 'ios-wheel-option',
-              highlightWrapper: 'ios-wheel-highlight-slot',
-              highlightItem: 'ios-wheel-highlight-item',
+              optionItem: 'sd-ios-wheel-option',
+              highlightWrapper: 'sd-ios-wheel-highlight-slot',
+              highlightItem: 'sd-ios-wheel-highlight-item',
             }}
           />
-          <span className="ios-wheel-unit is-right-cap" aria-hidden="true">
+          <span className="sd-ios-wheel-unit is-right-cap" aria-hidden="true">
             {secondsLabel}
           </span>
         </div>
@@ -205,11 +205,11 @@ export const AlarmWheelPicker: React.FC<AlarmWheelPickerProps> = ({
 
   return (
     <div
-      className={`ios-wheel-card alarm-wheel-card ${compact ? 'is-compact' : ''}`.trim()}
+      className={`sd-ios-wheel-card sd-alarm-wheel-card ${compact ? 'is-compact' : ''}`.trim()}
       dir="ltr"
     >
-      <WheelPickerWrapper className="ios-wheel-wrapper">
-        <div className="ios-wheel-col alarm-col">
+      <WheelPickerWrapper className="sd-ios-wheel-wrapper">
+        <div className="sd-ios-wheel-col alarm-col">
           {use24Hour ? (
             <WheelPicker<number>
               key="h24"
@@ -224,9 +224,9 @@ export const AlarmWheelPicker: React.FC<AlarmWheelPickerProps> = ({
                 onChange(nextH, minute);
               }}
               classNames={{
-                optionItem: 'ios-wheel-option alarm-wheel-option',
-                highlightWrapper: 'ios-wheel-highlight-slot is-left-cap',
-                highlightItem: 'ios-wheel-highlight-item alarm-wheel-highlight',
+                optionItem: 'sd-ios-wheel-option sd-alarm-wheel-option',
+                highlightWrapper: 'sd-ios-wheel-highlight-slot is-left-cap',
+                highlightItem: 'sd-ios-wheel-highlight-item sd-alarm-wheel-highlight',
               }}
             />
           ) : (
@@ -239,19 +239,19 @@ export const AlarmWheelPicker: React.FC<AlarmWheelPickerProps> = ({
               optionItemHeight={itemH}
               onValueChange={handleHour12Change}
               classNames={{
-                optionItem: 'ios-wheel-option alarm-wheel-option',
-                highlightWrapper: 'ios-wheel-highlight-slot is-left-cap',
-                highlightItem: 'ios-wheel-highlight-item alarm-wheel-highlight',
+                optionItem: 'sd-ios-wheel-option sd-alarm-wheel-option',
+                highlightWrapper: 'sd-ios-wheel-highlight-slot is-left-cap',
+                highlightItem: 'sd-ios-wheel-highlight-item sd-alarm-wheel-highlight',
               }}
             />
           )}
         </div>
 
-        <div className="ios-wheel-colon-col" aria-hidden="true">
-          <span className="ios-wheel-colon">:</span>
+        <div className="sd-ios-wheel-colon-col" aria-hidden="true">
+          <span className="sd-ios-wheel-colon">:</span>
         </div>
 
-        <div className="ios-wheel-col alarm-col">
+        <div className="sd-ios-wheel-col alarm-col">
           <WheelPicker<number>
             value={minute}
             options={MINUTES_60_OPTIONS}
@@ -264,15 +264,15 @@ export const AlarmWheelPicker: React.FC<AlarmWheelPickerProps> = ({
               onChange(hour24, nextM);
             }}
             classNames={{
-              optionItem: 'ios-wheel-option alarm-wheel-option',
-              highlightWrapper: `ios-wheel-highlight-slot ${use24Hour ? 'is-right-cap' : ''}`.trim(),
-              highlightItem: 'ios-wheel-highlight-item alarm-wheel-highlight',
+              optionItem: 'sd-ios-wheel-option sd-alarm-wheel-option',
+              highlightWrapper: `sd-ios-wheel-highlight-slot ${use24Hour ? 'is-right-cap' : ''}`.trim(),
+              highlightItem: 'sd-ios-wheel-highlight-item sd-alarm-wheel-highlight',
             }}
           />
         </div>
 
         {!use24Hour ? (
-          <div className="ios-wheel-col period-col">
+          <div className="sd-ios-wheel-col period-col">
             <WheelPicker<'AM' | 'PM'>
               value={isPm ? 'PM' : 'AM'}
               options={periodOptions}
@@ -281,9 +281,9 @@ export const AlarmWheelPicker: React.FC<AlarmWheelPickerProps> = ({
               optionItemHeight={itemH}
               onValueChange={handlePeriodChange}
               classNames={{
-                optionItem: 'ios-wheel-option period-wheel-option',
-                highlightWrapper: 'ios-wheel-highlight-slot is-right-cap',
-                highlightItem: 'ios-wheel-highlight-item period-wheel-highlight',
+                optionItem: 'sd-ios-wheel-option sd-period-wheel-option',
+                highlightWrapper: 'sd-ios-wheel-highlight-slot is-right-cap',
+                highlightItem: 'sd-ios-wheel-highlight-item sd-period-wheel-highlight',
               }}
             />
           </div>
@@ -389,16 +389,16 @@ export const TimeWheelPopoverField: React.FC<TimeWheelPopoverFieldProps> = ({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className={`input time-wheel-trigger ${open ? 'is-open' : ''}`.trim()}
+        className={`input sd-time-wheel-trigger ${open ? 'is-open' : ''}`.trim()}
       >
-        <span className="time-wheel-trigger-val" dir="ltr">
-          <Clock className="w-[15px] h-[15px] opacity-60 shrink-0" />
+        <span className="sd-time-wheel-trigger-val" dir="ltr">
+          <Icon name="schedule" style={{ fontSize: '18px', opacity: 0.68 }} />
           <span>{displayText}</span>
         </span>
-        <ChevronDown
-          className={`w-[15px] h-[15px] opacity-60 transition-transform ${
-            open ? 'rotate-180' : ''
-          }`}
+        <Icon
+          name="keyboard_arrow_down"
+          className={`transition-transform ${open ? 'rotate-180' : ''}`.trim()}
+          style={{ fontSize: '18px', opacity: 0.65 }}
         />
       </button>
 
@@ -406,7 +406,7 @@ export const TimeWheelPopoverField: React.FC<TimeWheelPopoverFieldProps> = ({
         ? createPortal(
             <div
               ref={popoverRef}
-              className="time-wheel-popover"
+              className="sd-time-wheel-popover"
               style={{
                 top: `${coords.top}px`,
                 left: `${coords.left}px`,
@@ -428,11 +428,11 @@ export const TimeWheelPopoverField: React.FC<TimeWheelPopoverFieldProps> = ({
                   );
                 }}
               />
-              <div className="time-wheel-popover-foot">
+              <div className="sd-time-wheel-popover-foot">
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="btn btn-sm btn-primary w-full"
+                  className="btn sd-btn-sm sd-btn-primary w-full"
                 >
                   {doneLabel}
                 </button>

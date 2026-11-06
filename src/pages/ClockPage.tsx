@@ -1,6 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Minus, Plus, SlidersHorizontal, X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlipCard, SecondsFlip } from '../components/FlipCard';
+import { Icon } from '../components/Icon';
+import {
+  WORLD_CITIES,
+  WORLD_COUNTRIES,
+  WORLD_TIME_ZONES,
+  US_STATES,
+  type CitySpec,
+  type WorldRegionKey,
+} from '../data/worldCities';
 import type { AppSettings, RouteKey } from '../types';
 import { readStorage, writeStorage } from '../utils/storage';
 import { getLanguageMeta, getStrings } from '../i18n';
@@ -12,45 +20,8 @@ interface ClockPageProps {
   onNavigate?: (route: RouteKey) => void;
   worldMode?: boolean;
   onChangeWorldMode?: (open: boolean) => void;
+  onShowToast?: (msg: string) => void;
 }
-
-interface CitySpec {
-  slug: string;
-  city: string;
-  cityAr: string;
-  country: string;
-  countryAr: string;
-  tz: string;
-  lat: number;
-  lng: number;
-}
-
-const ALL_CITIES: CitySpec[] = [
-  { slug: 'new-york', city: 'New York', cityAr: 'نيويورك', country: 'United States', countryAr: 'الولايات المتحدة', tz: 'America/New_York', lat: 40.7128, lng: -74.006 },
-  { slug: 'los-angeles', city: 'Los Angeles', cityAr: 'لوس أنجلوس', country: 'United States', countryAr: 'الولايات المتحدة', tz: 'America/Los_Angeles', lat: 34.0522, lng: -118.2437 },
-  { slug: 'chicago', city: 'Chicago', cityAr: 'شيكاغو', country: 'United States', countryAr: 'الولايات المتحدة', tz: 'America/Chicago', lat: 41.8781, lng: -87.6298 },
-  { slug: 'london', city: 'London', cityAr: 'لندن', country: 'United Kingdom', countryAr: 'المملكة المتحدة', tz: 'Europe/London', lat: 51.5074, lng: -0.1278 },
-  { slug: 'paris', city: 'Paris', cityAr: 'باريس', country: 'France', countryAr: 'فرنسا', tz: 'Europe/Paris', lat: 48.8566, lng: 2.3522 },
-  { slug: 'dubai', city: 'Dubai', cityAr: 'دبي', country: 'United Arab Emirates', countryAr: 'الإمارات', tz: 'Asia/Dubai', lat: 25.2048, lng: 55.2708 },
-  { slug: 'new-delhi', city: 'New Delhi', cityAr: 'نيودلهي', country: 'India', countryAr: 'الهند', tz: 'Asia/Kolkata', lat: 28.6139, lng: 77.209 },
-  { slug: 'manila', city: 'Manila', cityAr: 'مانيلا', country: 'Philippines', countryAr: 'الفلبين', tz: 'Asia/Manila', lat: 14.5995, lng: 120.9842 },
-  { slug: 'singapore', city: 'Singapore', cityAr: 'سنغافورة', country: 'Singapore', countryAr: 'سنغافورة', tz: 'Asia/Singapore', lat: 1.3521, lng: 103.8198 },
-  { slug: 'tokyo', city: 'Tokyo', cityAr: 'طوكيو', country: 'Japan', countryAr: 'اليابان', tz: 'Asia/Tokyo', lat: 35.6762, lng: 139.6503 },
-  { slug: 'sydney', city: 'Sydney', cityAr: 'سيدني', country: 'Australia', countryAr: 'أستراليا', tz: 'Australia/Sydney', lat: -33.8688, lng: 151.2093 },
-  { slug: 'toronto', city: 'Toronto', cityAr: 'تورونتو', country: 'Canada', countryAr: 'كندا', tz: 'America/Toronto', lat: 43.6532, lng: -79.3832 },
-  { slug: 'cairo', city: 'Cairo', cityAr: 'القاهرة', country: 'Egypt', countryAr: 'مصر', tz: 'Africa/Cairo', lat: 30.0444, lng: 31.2357 },
-  { slug: 'riyadh', city: 'Riyadh', cityAr: 'الرياض', country: 'Saudi Arabia', countryAr: 'السعودية', tz: 'Asia/Riyadh', lat: 24.7136, lng: 46.6753 },
-  { slug: 'berlin', city: 'Berlin', cityAr: 'برلين', country: 'Germany', countryAr: 'ألمانيا', tz: 'Europe/Berlin', lat: 52.52, lng: 13.405 },
-  { slug: 'madrid', city: 'Madrid', cityAr: 'مدريد', country: 'Spain', countryAr: 'إسبانيا', tz: 'Europe/Madrid', lat: 40.4168, lng: -3.7038 },
-  { slug: 'istanbul', city: 'Istanbul', cityAr: 'إسطنبول', country: 'Turkey', countryAr: 'تركيا', tz: 'Europe/Istanbul', lat: 41.0082, lng: 28.9784 },
-  { slug: 'hong-kong', city: 'Hong Kong', cityAr: 'هونغ كونغ', country: 'China', countryAr: 'الصين', tz: 'Asia/Hong_Kong', lat: 22.3193, lng: 114.1694 },
-  { slug: 'seoul', city: 'Seoul', cityAr: 'سيول', country: 'South Korea', countryAr: 'كوريا الجنوبية', tz: 'Asia/Seoul', lat: 37.5665, lng: 126.978 },
-  { slug: 'sao-paulo', city: 'São Paulo', cityAr: 'ساو باولو', country: 'Brazil', countryAr: 'البرازيل', tz: 'America/Sao_Paulo', lat: -23.5505, lng: -46.6333 },
-  { slug: 'mexico-city', city: 'Mexico City', cityAr: 'مكسيكو سيتي', country: 'Mexico', countryAr: 'المكسيك', tz: 'America/Mexico_City', lat: 19.4326, lng: -99.1332 },
-  { slug: 'amsterdam', city: 'Amsterdam', cityAr: 'أمستردام', country: 'Netherlands', countryAr: 'هولندا', tz: 'Europe/Amsterdam', lat: 52.3676, lng: 4.9041 },
-  { slug: 'zurich', city: 'Zurich', cityAr: 'زيورخ', country: 'Switzerland', countryAr: 'سويسرا', tz: 'Europe/Zurich', lat: 47.3769, lng: 8.5417 },
-  { slug: 'auckland', city: 'Auckland', cityAr: 'أوكلاند', country: 'New Zealand', countryAr: 'نيوزيلندا', tz: 'Pacific/Auckland', lat: -36.8485, lng: 174.7633 },
-];
 
 const PANEL_GRID_SLUGS = [
   'new-york',
@@ -68,20 +39,54 @@ const PANEL_GRID_SLUGS = [
 ];
 
 const DEFAULT_SAVED_SLUGS = ['los-angeles', 'new-york', 'london', 'dubai', 'tokyo', 'sydney'];
-const SAVED_CITIES_KEY = 'splitflap_world_cities_v2';
-const WORLD_VIEW_STATE_KEY = 'splitflap_world_view_v2';
+const SAVED_CITIES_KEY = 'splitdeck:v1:world:cities';
+const WORLD_MAIN_KEY = 'splitdeck:v1:world:main-city';
+const WORLD_VIEW_STATE_KEY = 'splitdeck:v1:world:view';
 
 interface WorldViewState {
   selectedSlug: string;
   planning: boolean;
-  planMinutes: number;
+  planQuarters: number; // -96..+96 (±24h in 15-min steps)
 }
 
-const MINUTES_LINKS = [5, 10, 15, 20, 25, 30, 45, 60];
-const HOURS_LINKS = [1, 2, 3, 4, 5, 6, 8, 12, 24, 48];
-const DAYS_LINKS = [7, 14, 21, 30, 45, 60, 90, 100, 120, 180];
+interface TimeCalcSpec {
+  amount: number;
+  unit: 'minute' | 'hour' | 'day' | 'week' | 'month';
+  dir: 1 | -1;
+  title: string;
+}
 
-// Solar sunrise/sunset approximation (SunCalc equation, BSD license)
+const CALC_MINUTES = [5, 10, 15, 20, 25, 30, 40, 45, 50, 90];
+const CALC_HOURS = [
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 36, 48, 72,
+];
+const CALC_DAYS = [
+  2, 3, 4, 5, 6, 7, 10, 14, 15, 20, 21, 30, 45, 60, 90, 100, 120, 180, 200, 365,
+];
+const CALC_WEEKS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 26, 52];
+const CALC_MONTHS = [1, 2, 3, 4, 6, 9, 12, 18];
+
+function applyCalcSpec(base: Date, spec: TimeCalcSpec | null): Date {
+  if (!spec) return base;
+  const d = new Date(base.getTime());
+  const delta = spec.amount * spec.dir;
+  if (spec.unit === 'minute') d.setMinutes(d.getMinutes() + delta);
+  else if (spec.unit === 'hour') d.setHours(d.getHours() + delta);
+  else if (spec.unit === 'day') d.setDate(d.getDate() + delta);
+  else if (spec.unit === 'week') d.setDate(d.getDate() + delta * 7);
+  else if (spec.unit === 'month') d.setMonth(d.getMonth() + delta);
+  return d;
+}
+
+function normalizeSearch(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[/_.,'-]/g, ' ')
+    .toLowerCase();
+}
+
+// Sunrise/sunset calculation adapted from SunCalc (BSD-2-Clause); see THIRD_PARTY_NOTICES.md.
 function calcSunTimes(lat: number, lng: number, date: Date): { sunrise: Date; sunset: Date } | null {
   const rad = Math.PI / 180;
   const J2000 = 2451545;
@@ -183,61 +188,131 @@ function formatUtcLabel(offsetMin: number): string {
   return m ? `UTC${sign}${h}:${String(m).padStart(2, '0')}` : `UTC${sign}${h}`;
 }
 
+function formatSignedOffset(minutes: number, bcp47: string): string {
+  if (minutes === 0) return '';
+  const sign = minutes > 0 ? '+' : '−';
+  const abs = Math.abs(minutes);
+  const hrs = Math.floor(abs / 60);
+  const mins = abs % 60;
+  try {
+    const unitSpace = /^(ja|zh)/.test(bcp47) ? '' : ' ';
+    const hrFmt = new Intl.NumberFormat(`${bcp47}-u-nu-latn`, {
+      style: 'unit',
+      unit: 'hour',
+      unitDisplay: 'short',
+    });
+    const minFmt = new Intl.NumberFormat(`${bcp47}-u-nu-latn`, {
+      style: 'unit',
+      unit: 'minute',
+      unitDisplay: 'short',
+    });
+    const parts = [hrs ? hrFmt.format(hrs) : '', mins ? minFmt.format(mins) : ''].filter(Boolean);
+    return `${sign}${parts.join(unitSpace)}`;
+  } catch {
+    if (hrs && mins) return `${sign}${hrs} hr ${mins} min`;
+    if (hrs) return `${sign}${hrs} hr`;
+    return `${sign}${mins} min`;
+  }
+}
+
 export const ClockPage: React.FC<ClockPageProps> = ({
   settings,
-  onQuickTimer,
-  onQuickCountdownDays,
+  onNavigate,
   worldMode = false,
   onChangeWorldMode,
+  onShowToast,
 }) => {
   const [baseNow, setBaseNow] = useState<Date>(() => new Date());
   const [internalWorldMode, setInternalWorldMode] = useState<boolean>(false);
   const isWorldMode = onChangeWorldMode ? worldMode : internalWorldMode;
-  const setWorldMode = (val: boolean) => {
-    if (onChangeWorldMode) onChangeWorldMode(val);
-    else setInternalWorldMode(val);
-  };
-
-  const initialWorldState = useMemo(
-    () =>
-      readStorage<WorldViewState>(WORLD_VIEW_STATE_KEY, {
-        selectedSlug: 'local',
-        planning: false,
-        planMinutes: 0,
-      }),
-    []
+  const setWorldMode = useCallback(
+    (val: boolean) => {
+      if (onChangeWorldMode) onChangeWorldMode(val);
+      else setInternalWorldMode(val);
+    },
+    [onChangeWorldMode]
   );
 
-  const [selectedSlug, setSelectedSlug] = useState<string>(initialWorldState.selectedSlug || 'local');
-  const [savedSlugs, setSavedSlugs] = useState<string[]>(() =>
-    readStorage<string[]>(SAVED_CITIES_KEY, DEFAULT_SAVED_SLUGS)
-  );
+  const cityMap = useMemo(() => {
+    const m = new Map<string, CitySpec>();
+    for (const c of WORLD_CITIES) m.set(c.slug, c);
+    return m;
+  }, []);
+
+  const initialMainSlug = useMemo(() => {
+    const saved = readStorage<string>(WORLD_MAIN_KEY, 'local');
+    return saved !== 'local' && cityMap.has(saved) ? saved : 'local';
+  }, [cityMap]);
+
+  const initialWorldState = useMemo(() => {
+    const raw = readStorage<Partial<WorldViewState> & { planMinutes?: number }>(
+      WORLD_VIEW_STATE_KEY,
+      {}
+    );
+    const savedSlug =
+      raw.selectedSlug && (raw.selectedSlug === 'local' || cityMap.has(raw.selectedSlug))
+        ? raw.selectedSlug
+        : initialMainSlug;
+    const quarters =
+      typeof raw.planQuarters === 'number'
+        ? Math.max(-96, Math.min(96, raw.planQuarters))
+        : typeof raw.planMinutes === 'number'
+        ? Math.round(raw.planMinutes / 15)
+        : 0;
+    return {
+      selectedSlug: savedSlug,
+      planning: Boolean(raw.planning),
+      planQuarters: quarters,
+    };
+  }, [cityMap, initialMainSlug]);
+
+  const [mainSlug, setMainSlug] = useState<string>(initialMainSlug);
+  const [selectedSlug, setSelectedSlug] = useState<string>(initialWorldState.selectedSlug);
+  const [savedSlugs, setSavedSlugs] = useState<string[]>(() => {
+    const raw = readStorage<string[]>(SAVED_CITIES_KEY, DEFAULT_SAVED_SLUGS);
+    const valid = Array.isArray(raw) ? raw.filter((s) => cityMap.has(s)) : DEFAULT_SAVED_SLUGS;
+    return valid.length > 0 ? valid : DEFAULT_SAVED_SLUGS;
+  });
   const [editingCities, setEditingCities] = useState(false);
-  const [planning, setPlanning] = useState(Boolean(initialWorldState.planning));
-  const [planMinutes, setPlanMinutes] = useState(
-    typeof initialWorldState.planMinutes === 'number' ? initialWorldState.planMinutes : 0
-  ); // -1440 to +1440 in 15m steps
+  const [planning, setPlanning] = useState(initialWorldState.planning);
+  const [planQuarters, setPlanQuarters] = useState(initialWorldState.planQuarters);
   const [cityModalOpen, setCityModalOpen] = useState(false);
   const [cityQuery, setCityQuery] = useState('');
+  const [calcSpec, setCalcSpec] = useState<TimeCalcSpec | null>(null);
+
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const cityRowRef = useRef<HTMLUListElement | null>(null);
 
   const t = getStrings(settings.language);
   const langMeta = getLanguageMeta(settings.language);
   const isAr = settings.language === 'ar';
-  const cityName = (c: CitySpec) => (isAr ? c.cityAr : c.city);
-  const countryName = (c: CitySpec) => (isAr ? c.countryAr : c.country);
+  const cityName = useCallback(
+    (c: CitySpec) => (isAr && c.cityAr ? c.cityAr : c.city),
+    [isAr]
+  );
+  const countryName = useCallback(
+    (c: CitySpec) => (isAr && c.countryAr ? c.countryAr : c.country),
+    [isAr]
+  );
 
+  // Persist saved cities, pinned city, and world view state
   useEffect(() => {
     writeStorage(SAVED_CITIES_KEY, savedSlugs);
   }, [savedSlugs]);
 
   useEffect(() => {
+    writeStorage(WORLD_MAIN_KEY, mainSlug);
+  }, [mainSlug]);
+
+  useEffect(() => {
     writeStorage<WorldViewState>(WORLD_VIEW_STATE_KEY, {
       selectedSlug,
       planning,
-      planMinutes,
+      planQuarters,
     });
-  }, [selectedSlug, planning, planMinutes]);
+  }, [selectedSlug, planning, planQuarters]);
 
+  // Align updates to the wall clock and resync when the tab becomes visible.
   useEffect(() => {
     let timerId: number;
     const schedule = () => {
@@ -248,16 +323,71 @@ export const ClockPage: React.FC<ClockPageProps> = ({
       }, 1000 - (ms % 1000) + 5);
     };
     schedule();
-    return () => window.clearTimeout(timerId);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        window.clearTimeout(timerId);
+        setBaseNow(new Date());
+        schedule();
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.clearTimeout(timerId);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, []);
 
-  const effectiveNow = useMemo(
-    () => new Date(baseNow.getTime() + planMinutes * 60000),
-    [baseNow, planMinutes]
-  );
+  // Escape closes the city picker or leaves city-edit mode.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (cityModalOpen) {
+          setCityModalOpen(false);
+        } else if (editingCities) {
+          setEditingCities(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [cityModalOpen, editingCities]);
+
+  // Restore the default city list and local-time view.
+  useEffect(() => {
+    const onReset = () => {
+      setEditingCities(false);
+      setPlanning(false);
+      setPlanQuarters(0);
+      setSavedSlugs(DEFAULT_SAVED_SLUGS);
+      setMainSlug('local');
+      setSelectedSlug('local');
+    };
+    window.addEventListener('settingsreset', onReset);
+    return () => window.removeEventListener('settingsreset', onReset);
+  }, []);
+
+  // Keep saved cities in geographic order from west to east.
+  const sortedSavedSpecs = useMemo(() => {
+    const specs = savedSlugs
+      .map((s) => cityMap.get(s))
+      .filter((c): c is CitySpec => Boolean(c));
+    const refDate = new Date();
+    specs.sort(
+      (a, b) =>
+        tzOffsetMinutes(a.tz, refDate) - tzOffsetMinutes(b.tz, refDate) ||
+        cityName(a).localeCompare(cityName(b))
+    );
+    return specs;
+  }, [savedSlugs, cityMap, cityName]);
+
+  const planMinutes = planQuarters * 15;
+  const effectiveNow = useMemo(() => {
+    const planned = new Date(baseNow.getTime() + planMinutes * 60000);
+    return applyCalcSpec(planned, calcSpec);
+  }, [baseNow, planMinutes, calcSpec]);
 
   const activeCitySpec =
-    selectedSlug === 'local' ? null : ALL_CITIES.find((c) => c.slug === selectedSlug) ?? null;
+    selectedSlug === 'local' ? null : cityMap.get(selectedSlug) ?? null;
   const activeTz = isWorldMode && activeCitySpec ? activeCitySpec.tz : '';
 
   const displayDate = getWallClockInZone(effectiveNow, activeTz);
@@ -275,7 +405,9 @@ export const ClockPage: React.FC<ClockPageProps> = ({
         day: 'numeric',
       }).format(displayDate);
     } catch {
-      return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(displayDate);
+      return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(
+        displayDate
+      );
     }
   }, [displayDate, langMeta.bcp47]);
 
@@ -287,138 +419,266 @@ export const ClockPage: React.FC<ClockPageProps> = ({
     }
   }, [displayDate, langMeta.bcp47]);
 
-  const localOffset = -effectiveNow.getTimezoneOffset();
-  const localZoneName = useMemo(() => {
+  const localZoneId = useMemo(() => {
     try {
-      const z = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local';
-      return z.slice(z.lastIndexOf('/') + 1).replace(/_/g, ' ');
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
     } catch {
-      return 'Local';
+      return '';
     }
   }, []);
 
+  const localCityMatch = useMemo(
+    () => WORLD_CITIES.find((c) => c.tz === localZoneId) ?? null,
+    [localZoneId]
+  );
+
+  const localZoneDisplay = useMemo(() => {
+    if (localCityMatch) return cityName(localCityMatch);
+    if (!localZoneId) return 'Local';
+    return localZoneId.slice(localZoneId.lastIndexOf('/') + 1).replace(/_/g, ' ');
+  }, [localCityMatch, cityName, localZoneId]);
+
+  const localOffset = -effectiveNow.getTimezoneOffset();
+
+  // Prepare the selected city name, offset, and available solar details.
   const headingMeta = useMemo(() => {
     if (!isWorldMode) return null;
+
     if (!activeCitySpec) {
+      const sun = localCityMatch
+        ? calcSunTimes(localCityMatch.lat, localCityMatch.lng, effectiveNow)
+        : null;
+      const sunText = sun
+        ? `↑ ${formatShortTime(sun.sunrise, '', settings.use24Hour)} ↓ ${formatShortTime(
+            sun.sunset,
+            '',
+            settings.use24Hour
+          )}`
+        : '\u00a0';
+
       return {
         title: t.headerLocalTime,
-        line1: `${localZoneName} · ${formatUtcLabel(localOffset)}`,
-        diffText: '',
-        sunText: '',
+        zoneLine: `${localZoneDisplay} · ${formatUtcLabel(localOffset)}`,
+        sunText,
       };
     }
+
     const cityOff = tzOffsetMinutes(activeCitySpec.tz, effectiveNow);
     const diffMin = cityOff - localOffset;
-    const diffHr = Math.round((diffMin / 60) * 10) / 10;
-    const diffText =
-      diffMin === 0
-        ? isAr
-          ? 'نفس توقيتك'
-          : 'Same time as you'
-        : diffMin > 0
-        ? isAr
-          ? `+${diffHr} س متقدم`
-          : `+${diffHr} hr ahead`
-        : isAr
-        ? `${diffHr} س متأخر`
-        : `${diffHr} hr behind`;
+
+    let relDayLabel = '';
+    try {
+      const cityWall = getWallClockInZone(effectiveNow, activeCitySpec.tz);
+      const dayDelta = Math.round(
+        (Date.UTC(cityWall.getFullYear(), cityWall.getMonth(), cityWall.getDate()) -
+          Date.UTC(
+            effectiveNow.getFullYear(),
+            effectiveNow.getMonth(),
+            effectiveNow.getDate()
+          )) /
+          86400000
+      );
+      if ('RelativeTimeFormat' in Intl) {
+        const rtf = new Intl.RelativeTimeFormat(langMeta.bcp47, { numeric: 'auto' });
+        const raw = rtf.format(dayDelta, 'day');
+        relDayLabel = raw.charAt(0).toLocaleUpperCase(langMeta.bcp47) + raw.slice(1);
+      }
+    } catch {
+      relDayLabel = '';
+    }
+
+    const diffStr =
+      diffMin === 0 ? t.sameTime : formatSignedOffset(diffMin, langMeta.bcp47);
+    const zoneLine = [relDayLabel, formatUtcLabel(cityOff), diffStr]
+      .filter(Boolean)
+      .join(' · ');
 
     const sun = calcSunTimes(activeCitySpec.lat, activeCitySpec.lng, effectiveNow);
     const sunText = sun
-      ? `↑ ${formatShortTime(sun.sunrise, activeCitySpec.tz, settings.use24Hour)} · ↓ ${formatShortTime(
+      ? `↑ ${formatShortTime(sun.sunrise, activeCitySpec.tz, settings.use24Hour)} ↓ ${formatShortTime(
           sun.sunset,
           activeCitySpec.tz,
           settings.use24Hour
         )}`
-      : '';
+      : '\u00a0';
 
     return {
-      title: isAr ? activeCitySpec.cityAr : activeCitySpec.city,
-      line1: `${isAr ? activeCitySpec.countryAr : activeCitySpec.country} · ${formatUtcLabel(cityOff)}`,
-      diffText,
+      title: cityName(activeCitySpec),
+      zoneLine,
       sunText,
     };
-  }, [isWorldMode, activeCitySpec, effectiveNow, localOffset, localZoneName, settings.use24Hour, t.headerLocalTime, isAr]);
+  }, [
+    isWorldMode,
+    activeCitySpec,
+    localCityMatch,
+    effectiveNow,
+    settings.use24Hour,
+    t.headerLocalTime,
+    t.sameTime,
+    localZoneDisplay,
+    localOffset,
+    langMeta.bcp47,
+    cityName,
+  ]);
 
   const panelGridCities = useMemo(
     () =>
-      PANEL_GRID_SLUGS.map((slug) => ALL_CITIES.find((c) => c.slug === slug)).filter(
-        Boolean
-      ) as CitySpec[],
-    []
+      PANEL_GRID_SLUGS.map((slug) => cityMap.get(slug)).filter(
+        (c): c is CitySpec => Boolean(c)
+      ),
+    [cityMap]
   );
 
+  // Match city searches against normalized word prefixes.
   const filteredModalCities = useMemo(() => {
-    const q = cityQuery.trim().toLowerCase();
-    if (!q) return ALL_CITIES;
-    return ALL_CITIES.filter(
-      (c) =>
-        c.city.toLowerCase().includes(q) ||
-        c.country.toLowerCase().includes(q) ||
-        c.cityAr.includes(q) ||
-        c.countryAr.includes(q)
-    );
+    const q = normalizeSearch(cityQuery.trim());
+    if (!q) return WORLD_CITIES;
+    return WORLD_CITIES.filter((c) => {
+      const hay = ` ${normalizeSearch(
+        `${c.city} ${c.country} ${c.slug.replace(/-/g, ' ')} ${c.cityAr || ''} ${c.countryAr || ''}`
+      )}`;
+      return hay.includes(` ${q}`) || hay.includes(q);
+    });
   }, [cityQuery]);
 
-  const sliderPct = 50 + (planMinutes / 1440) * 50;
-  const planFrom = `${Math.min(50, sliderPct)}%`;
-  const planTo = `${Math.max(50, sliderPct)}%`;
+  const citiesByRegion = useMemo(() => {
+    const groups: { key: WorldRegionKey; title: string; items: CitySpec[] }[] = [
+      { key: 'us', title: isAr ? 'الولايات المتحدة' : 'United States', items: [] },
+      { key: 'americas', title: isAr ? 'الأمريكتان' : 'Americas', items: [] },
+      { key: 'europe', title: isAr ? 'أوروبا' : 'Europe', items: [] },
+      {
+        key: 'asia_me',
+        title: isAr ? 'آسيا والشرق الأوسط' : 'Asia and the Middle East',
+        items: [],
+      },
+      { key: 'africa', title: isAr ? 'أفريقيا' : 'Africa', items: [] },
+      {
+        key: 'oceania',
+        title: isAr ? 'أستراليا والمحيط الهادئ' : 'Australia and the Pacific',
+        items: [],
+      },
+    ];
+    for (const c of WORLD_CITIES) {
+      const g = groups.find((x) => x.key === c.region);
+      if (g) g.items.push(c);
+    }
+    return groups;
+  }, [isAr]);
 
-  const formatPlanLabel = (mins: number) => {
-    if (mins === 0) return t.now;
-    const sign = mins > 0 ? '+' : '−';
-    const abs = Math.abs(mins);
-    const h = Math.floor(abs / 60);
-    const m = abs % 60;
-    if (h && m) return `${sign}${h}h ${m}m`;
-    if (h) return `${sign}${h} hr`;
-    return `${sign}${m} min`;
+  const selectCityOnClock = (slug: string, ensureInRow = false) => {
+    setCalcSpec(null);
+    if (ensureInRow && slug !== 'local' && !savedSlugs.includes(slug)) {
+      setSavedSlugs((prev) => [...prev, slug]);
+    }
+    setSelectedSlug(slug);
+    if (!isWorldMode) setWorldMode(true);
+
+    // Keep chosen chip centered in horizontal city row
+    window.requestAnimationFrame(() => {
+      const row = cityRowRef.current;
+      if (!row || row.scrollWidth <= row.clientWidth) return;
+      const chip = row.querySelector<HTMLElement>(`[data-city="${slug}"]`);
+      if (chip) {
+        const left =
+          chip.getBoundingClientRect().left -
+          row.getBoundingClientRect().left +
+          row.scrollLeft;
+        row.scrollTo({
+          left: left - (row.clientWidth - chip.offsetWidth) / 2,
+          behavior: 'smooth',
+        });
+      }
+    });
   };
+
+  const handleTogglePin = () => {
+    const nextMain = selectedSlug === mainSlug ? 'local' : selectedSlug;
+    setMainSlug(nextMain);
+    if (nextMain === 'local') {
+      onShowToast?.(t.unpinnedCityToast);
+    } else {
+      const spec = cityMap.get(nextMain);
+      const name = spec ? cityName(spec) : t.headerLocalTime;
+      onShowToast?.(t.pinnedCityToast.replace('{name}', name));
+    }
+  };
+
+  const isPinned = selectedSlug === mainSlug;
+  const showPinButton = !(selectedSlug === 'local' && mainSlug === 'local');
+  const currentPlaceLabel = activeCitySpec ? cityName(activeCitySpec) : t.headerLocalTime;
+  const pinAriaLabel = (isPinned ? t.unpinCityLabel : t.pinCityLabel).replace(
+    '{name}',
+    currentPlaceLabel
+  );
+
+  const sliderAtPct = ((planQuarters + 96) / 192) * 100;
+  const planFrom = `${Math.min(50, sliderAtPct)}%`;
+  const planTo = `${Math.max(50, sliderAtPct)}%`;
+  const plannerButtonLabel =
+    planQuarters === 0
+      ? t.now
+      : formatSignedOffset(planQuarters * 15, langMeta.bcp47);
 
   return (
     <>
-      <div className="page-content-wrapper">
+      <div className="sd-page-content-wrapper">
         <div
           id="clock-page"
-          className={`page-container ${isWorldMode ? 'with-heading with-cities' : ''}`.trim()}
+          className={`sd-page-container ${isWorldMode ? 'with-heading with-cities' : ''}`.trim()}
         >
           {isWorldMode && headingMeta ? (
-            <div className="place-heading">
-              <div className="place-title-row">
-                <h2 className="place-title">{headingMeta.title}</h2>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWorldMode(false);
-                    setSelectedSlug('local');
-                    setPlanning(false);
-                    setPlanMinutes(0);
-                    setEditingCities(false);
-                  }}
-                  className="title-action"
-                  aria-label="Exit World Clock mode"
-                  title="Back to simple clock"
-                >
-                  <X className="w-[18px] h-[18px]" />
-                </button>
+            <div className="sd-place-heading">
+              <div className="sd-place-title-row">
+                <h2 className="sd-place-title">
+                  {calcSpec ? calcSpec.title : headingMeta.title}
+                </h2>
+                {!calcSpec && showPinButton ? (
+                  <button
+                    id="pin-city"
+                    type="button"
+                    aria-pressed={isPinned}
+                    aria-label={pinAriaLabel}
+                    title={pinAriaLabel}
+                    onClick={handleTogglePin}
+                    className="sd-title-action"
+                  >
+                    <Icon name={isPinned ? 'keep_fill' : 'keep'} />
+                  </button>
+                ) : null}
               </div>
-              <div className="place-meta world-meta">
-                <span>
-                  {headingMeta.line1}
-                  {headingMeta.diffText ? (
-                    <>
-                      {' · '}
-                      <span className="place-diff">{headingMeta.diffText}</span>
-                    </>
-                  ) : null}
-                </span>
-                {headingMeta.sunText ? <span dir="ltr">{headingMeta.sunText}</span> : null}
-              </div>
+              {calcSpec ? (
+                <div className="sd-calc-answer">
+                  {new Intl.DateTimeFormat(`${langMeta.bcp47}-u-nu-latn`, {
+                    weekday: 'long',
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: !settings.use24Hour,
+                  }).format(displayDate)}{' '}
+                  <button
+                    type="button"
+                    onClick={() => setCalcSpec(null)}
+                    className="chip"
+                    style={{ height: '26px', padding: '0 10px', marginLeft: '6px', fontSize: '12px' }}
+                  >
+                    {t.now}
+                  </button>
+                </div>
+              ) : (
+                <div className="sd-place-meta sd-world-meta">
+                  <span>{headingMeta.zoneLine}</span>
+                  <span className="sd-place-sun" dir="ltr">
+                    {headingMeta.sunText}
+                  </span>
+                </div>
+              )}
             </div>
           ) : null}
 
           <div
-            className="flip-display"
+            className="sd-flip-display sd-flip-clock"
             role="timer"
             aria-label={`${hoursStr}:${minutesStr}`}
           >
@@ -433,118 +693,142 @@ export const ClockPage: React.FC<ClockPageProps> = ({
             </FlipCard>
           </div>
 
-          {/* Interactive World Clock Chips + Time Planner */}
+          {/* Keep the city strip visible in fullscreen so several locations can be compared. */}
           {isWorldMode ? (
             <>
-              <ul className="world-cities hide-in-fullscreen" aria-label={t.worldClock}>
-                <li>
+              <ul
+                ref={cityRowRef}
+                className={`sd-world-cities ${editingCities ? 'editing' : ''}`.trim()}
+                aria-label={t.worldClock}
+              >
+                <li className="sd-hide-in-fullscreen">
                   <button
+                    id="add-city-btn"
                     type="button"
-                    onClick={() => setCityModalOpen(true)}
-                    className="city-chip tool-chip"
-                    aria-label="Add city"
-                    title="Add city"
+                    onClick={() => {
+                      setEditingCities(false);
+                      setCityQuery('');
+                      setCityModalOpen(true);
+                      window.setTimeout(() => searchInputRef.current?.focus(), 40);
+                    }}
+                    className="sd-city-chip sd-tool-chip"
+                    aria-label={t.yourCities}
+                    title={t.yourCities}
                   >
-                    <Plus className="w-[20px] h-[20px]" />
+                    <Icon name="add" />
                   </button>
                 </li>
-                <li>
+                <li className="sd-hide-in-fullscreen">
                   <button
+                    id="edit-cities-btn"
                     type="button"
                     aria-pressed={editingCities}
-                    onClick={() => setEditingCities((v) => !v)}
-                    className="city-chip tool-chip"
+                    onClick={() => {
+                      setPlanning(false);
+                      setPlanQuarters(0);
+                      setEditingCities((v) => !v);
+                    }}
+                    className="sd-city-chip sd-tool-chip"
                     aria-label="Edit cities"
-                    title="Remove cities"
+                    title="Edit cities"
                   >
-                    <Minus className="w-[20px] h-[20px]" />
+                    <Icon name={editingCities ? 'check' : 'edit'} />
                   </button>
                 </li>
-                <li>
+                <li className="sd-hide-in-fullscreen">
                   <button
+                    id="plan-time-btn"
                     type="button"
                     aria-pressed={planning}
                     onClick={() => {
+                      setEditingCities(false);
                       setPlanning((v) => {
-                        if (v) setPlanMinutes(0);
+                        if (v) setPlanQuarters(0);
                         return !v;
                       });
                     }}
-                    className="city-chip tool-chip"
-                    aria-label="Plan a time across zones"
-                    title="Time zone planner"
+                    className="sd-city-chip sd-tool-chip"
+                    aria-label="Plan a time"
+                    title="Plan a time"
                   >
-                    <SlidersHorizontal className="w-[19px] h-[19px]" />
+                    <Icon name="schedule" />
                   </button>
                 </li>
 
-                <li className="world-divider" aria-hidden="true" />
+                <li className="sd-world-divider sd-hide-in-fullscreen" aria-hidden="true" />
 
                 <li>
                   <button
                     type="button"
+                    data-city="local"
                     aria-current={selectedSlug === 'local' ? 'true' : undefined}
-                    onClick={() => setSelectedSlug('local')}
-                    className="city-chip"
+                    onClick={() => {
+                      if (!editingCities) selectCityOnClock('local');
+                    }}
+                    className="sd-city-chip"
                   >
-                    <span className="city-chip-name">{t.yourTime}</span>
-                    <span className="city-chip-time" dir="ltr">
-                      {formatShortTime(effectiveNow, '', settings.use24Hour)}
+                    <span className="sd-city-chip-name">{t.yourTime}</span>
+                    <span className="sd-city-chip-time" dir="ltr">
+                      <span className="sd-city-chip-clock">
+                        {formatShortTime(effectiveNow, '', settings.use24Hour)}
+                      </span>
                     </span>
                   </button>
                 </li>
 
-                {savedSlugs.map((slug) => {
-                  const spec = ALL_CITIES.find((c) => c.slug === slug);
-                  if (!spec) return null;
-                  const diffHrs = Math.round(
-                    (tzOffsetMinutes(spec.tz, effectiveNow) - localOffset) / 60
-                  );
+                {sortedSavedSpecs.map((spec) => {
+                  const diffMin = tzOffsetMinutes(spec.tz, effectiveNow) - localOffset;
                   const diffLabel =
-                    diffHrs === 0 ? '' : diffHrs > 0 ? `+${diffHrs} hr` : `${diffHrs} hr`;
+                    diffMin === 0 ? '' : formatSignedOffset(diffMin, langMeta.bcp47);
                   return (
                     <li key={spec.slug} className="relative">
                       <button
                         type="button"
+                        data-city={spec.slug}
+                        data-zone={spec.tz}
                         aria-current={selectedSlug === spec.slug ? 'true' : undefined}
                         onClick={() => {
                           if (editingCities) {
-                            setSavedSlugs((prev) => prev.filter((s) => s !== spec.slug));
+                            const nextList = savedSlugs.filter((s) => s !== spec.slug);
+                            setSavedSlugs(nextList);
                             if (selectedSlug === spec.slug) setSelectedSlug('local');
+                            if (mainSlug === spec.slug) setMainSlug('local');
+                            if (nextList.length === 0) setEditingCities(false);
                           } else {
-                            setSelectedSlug(spec.slug);
+                            selectCityOnClock(spec.slug);
                           }
                         }}
-                        className="city-chip"
+                        className="sd-city-chip"
                       >
-                        <span className="city-chip-name">{cityName(spec)}</span>
-                        <span className="city-chip-time" dir="ltr">
-                          <span>{formatShortTime(effectiveNow, spec.tz, settings.use24Hour)}</span>
-                          {diffLabel ? <span className="city-chip-diff">{diffLabel}</span> : null}
-                        </span>
-                        {editingCities ? (
-                          <span className="city-chip-remove" aria-hidden="true">
-                            <X className="w-[12px] h-[12px]" />
+                        <span className="sd-city-chip-name">{cityName(spec)}</span>
+                        <span className="sd-city-chip-time" dir="ltr">
+                          <span className="sd-city-chip-clock">
+                            {formatShortTime(effectiveNow, spec.tz, settings.use24Hour)}
                           </span>
-                        ) : null}
+                          {diffLabel ? <span className="sd-city-chip-diff">{diffLabel}</span> : null}
+                        </span>
+                        <span className="sd-city-chip-remove" aria-hidden="true">
+                          <Icon name="remove" />
+                        </span>
                       </button>
                     </li>
                   );
                 })}
               </ul>
 
-              <div className="stage-footer hide-in-fullscreen">
+              <div className={`sd-stage-footer sd-hide-in-fullscreen ${planning ? 'planning' : ''}`.trim()}>
                 {planning ? (
-                  <div className="time-planner">
+                  <div id="sd-time-planner" className="sd-time-planner">
                     <input
+                      id="sd-plan-slider"
                       type="range"
-                      min={-1440}
-                      max={1440}
-                      step={15}
-                      value={planMinutes}
+                      min={-96}
+                      max={96}
+                      step={1}
+                      value={planQuarters}
                       aria-label="Shift world clock time"
-                      onChange={(e) => setPlanMinutes(Number(e.target.value))}
-                      className="plan-slider"
+                      onChange={(e) => setPlanQuarters(Number(e.target.value))}
+                      className="sd-plan-slider"
                       style={
                         {
                           '--from': planFrom,
@@ -553,17 +837,19 @@ export const ClockPage: React.FC<ClockPageProps> = ({
                       }
                     />
                     <button
+                      id="plan-now"
                       type="button"
-                      disabled={planMinutes === 0}
-                      onClick={() => setPlanMinutes(0)}
-                      className="planner-now"
+                      disabled={planQuarters === 0}
+                      onClick={() => setPlanQuarters(0)}
+                      className="sd-planner-now"
+                      dir="ltr"
                     >
-                      {formatPlanLabel(planMinutes)}
+                      {plannerButtonLabel}
                     </button>
                   </div>
                 ) : (
-                  <div className="clock-status">
-                    <span className="status-dot" />
+                  <div id="sd-clock-status" className="sd-clock-status is-ready">
+                    <span className="sd-status-dot" />
                     <span>{t.deviceClockSynced}</span>
                   </div>
                 )}
@@ -573,65 +859,421 @@ export const ClockPage: React.FC<ClockPageProps> = ({
         </div>
       </div>
 
-      {/* World Clock Panel right below Stage (exact Flip Clock v2 placement) */}
-      <div className="page-panels">
-        <section className="panel world-panel" aria-labelledby="world-clock-panel-title">
-          <div className="panel-header">
-            <h2 id="world-clock-panel-title" className="panel-title">
-              {t.worldClock}
-            </h2>
-          </div>
+      {/* World Clock Panel right below Stage on main Clock route */}
+      {!isWorldMode ? (
+        <div className="sd-page-panels">
+          <section className="panel sd-world-panel" aria-labelledby="world-clock-panel-title">
+            <div className="sd-panel-header">
+              <h2 id="world-clock-panel-title" className="sd-panel-title">
+                {t.worldClock}
+              </h2>
+            </div>
 
-          <ul className="city-grid">
-            {panelGridCities.map((spec) => (
-              <li key={spec.slug}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!savedSlugs.includes(spec.slug)) {
-                      setSavedSlugs((prev) => [...prev, spec.slug]);
-                    }
-                    setSelectedSlug(spec.slug);
-                    setWorldMode(true);
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  className="city-time"
-                >
-                  <span className="city-name">{cityName(spec)}</span>
-                  <span className="city-clock" dir="ltr">
-                    {formatShortTime(baseNow, spec.tz, settings.use24Hour)}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+            <ul className="sd-city-grid">
+              {panelGridCities.map((spec) => (
+                <li key={spec.slug}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      selectCityOnClock(spec.slug, true);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="sd-city-time w-full"
+                  >
+                    <span className="sd-city-name">{cityName(spec)}</span>
+                    <span className="sd-city-clock" dir="ltr">
+                      {formatShortTime(baseNow, spec.tz, settings.use24Hour)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
 
-          <div className="panel-footer">
-            <button
-              type="button"
-              onClick={() => {
-                setWorldMode(true);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-            >
-              {t.allCitiesLink}
-            </button>
-          </div>
-        </section>
-      </div>
+            <div className="sd-panel-footer">
+              <a
+                href="#/world-clock"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setWorldMode(true);
+                  if (mainSlug !== 'local') setSelectedSlug(mainSlug);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+              >
+                {t.allCitiesLink}
+              </a>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
-      {/* Below-the-fold Neutral Guide & Quick Calculators */}
-      <article className="info-article">
-        {isAr ? (
+      {/* Editorial Guide + Directory */}
+      <article className="sd-info-article">
+        {isWorldMode ? (
           <>
-            <h2>ما هي الساعة القلّابة عبر الإنترنت؟</h2>
+            {isAr ? (
+              <>
+                <h2>قارن التوقيت الحالي بين المدن</h2>
+                <p>
+                  لكل مدينة توقيتها المحلي، وقد يختلف عن مدينتك بساعات أو بتاريخ تقويمي مختلف. اختر موقعاً
+                  لعرض ساعته وفارق التوقيت، مع أوقات الشروق والغروب عندما تتوفر بياناتها.
+                </p>
+                <p>
+                  ثبّت المدينة التي تريد متابعتها، وأضف مواقع أخرى أو أزلها من القائمة. يغيّر منزلق التخطيط
+                  الوقت المقارَن في جميع المدن لمساعدتك على اختيار فترة مناسبة للتواصل.
+                </p>
+                <h2>ما الذي تحدده المنطقة الزمنية؟</h2>
+                <p>
+                  المنطقة الزمنية قاعدة محلية لتحويل الوقت المدني، وقد تتغير قواعدها حسب قرارات كل بلد.
+                  يستخدم المتصفح بيانات المنطقة الزمنية المدمجة في الجهاز لحساب التوقيت لكل مدينة.
+                </p>
+                <h2>تغيّر التوقيت الموسمي</h2>
+                <p>
+                  بعض المناطق تقدّم الساعة أو تؤخرها في تواريخ موسمية، فيما لا تطبق مناطق أخرى هذا التغيير.
+                  لذلك قد يتبدل فارق الساعات بين مدينتين خلال السنة حتى إن لم تتغير المنطقة الزمنية الأساسية.
+                </p>
+                <h2>نسّق اجتماعاً أو خطط رحلة</h2>
+                <p>
+                  أضف المدن التي تهم المشاركين، ثم حرّك شريط المقارنة وابحث عن وقت يقع ضمن ساعات مناسبة
+                  لأكبر عدد منهم. أثناء السفر، راجع وقت الوصول المحلي بدلاً من الاعتماد على فرق ثابت بين
+                  البلدين.
+                </p>
+              </>
+            ) : (
+              <>
+                <h2>Compare current time across cities</h2>
+                <p>
+                  Each city follows its own local time and may be several hours—or even a calendar day—away
+                  from yours. Select a location to see its clock, offset, and sunrise and sunset estimates
+                  where the required location data is available.
+                </p>
+                <p>
+                  Pin a place to keep it prominent, add other locations, or remove ones you no longer need.
+                  The planning slider shifts the comparison time across the city list to help you find a
+                  practical window for contact.
+                </p>
+                <h2>What a time zone represents</h2>
+                <p>
+                  A time zone is a local rule for civil time, and its rules can change through legislation.
+                  The browser uses the time-zone database available on your device to calculate each city&apos;s
+                  local clock.
+                </p>
+                <h2>Seasonal clock changes</h2>
+                <p>
+                  Some regions move clocks forward or back during part of the year, while others keep the
+                  same offset. As a result, the gap between two cities can change even when neither city has
+                  moved to a different base zone.
+                </p>
+                <h2>Plan a meeting or a journey</h2>
+                <p>
+                  Add the cities where participants live, then move the comparison slider to find a time
+                  that falls within reasonable hours for as many people as possible. When travelling, check
+                  the destination&apos;s local time instead of assuming a fixed offset.
+                </p>
+              </>
+            )}
+
+            <div className="sd-link-directory">
+              <h2>{isAr ? 'جميع المدن' : 'All Cities'}</h2>
+              {citiesByRegion.map((grp) => (
+                <React.Fragment key={grp.key}>
+                  <h3>{grp.title}</h3>
+                  <div className="sd-chip-row sd-link-chips">
+                    {grp.items.map((spec) => (
+                      <button
+                        key={spec.slug}
+                        type="button"
+                        onClick={() => {
+                          selectCityOnClock(spec.slug, true);
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className={`chip ${selectedSlug === spec.slug ? 'active' : ''}`.trim()}
+                      >
+                        {cityName(spec)}
+                      </button>
+                    ))}
+                  </div>
+                </React.Fragment>
+              ))}
+
+              <h2>{isAr ? 'المناطق الزمنية' : 'Time Zones'}</h2>
+              <div className="sd-chip-row sd-link-chips">
+                {WORLD_TIME_ZONES.map((z) => (
+                  <button
+                    key={`${z.code}-${z.name}`}
+                    type="button"
+                    onClick={() => {
+                      if (z.representativeSlug) {
+                        selectCityOnClock(z.representativeSlug, true);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }
+                    }}
+                    className="chip"
+                  >
+                    {z.code} – {z.name}
+                  </button>
+                ))}
+              </div>
+
+              <h2>{isAr ? 'الدول' : 'Countries'}</h2>
+              <div className="sd-chip-row sd-link-chips">
+                {WORLD_COUNTRIES.map((place) => (
+                  <button
+                    key={place.name}
+                    type="button"
+                    onClick={() => {
+                      selectCityOnClock(place.representativeSlug, true);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="chip"
+                  >
+                    {place.name}
+                  </button>
+                ))}
+              </div>
+
+              <h2>{isAr ? 'الولايات الأمريكية' : 'US States'}</h2>
+              <div className="sd-chip-row sd-link-chips">
+                {US_STATES.map((place) => (
+                  <button
+                    key={place.name}
+                    type="button"
+                    onClick={() => {
+                      selectCityOnClock(place.representativeSlug, true);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="chip"
+                  >
+                    {place.name}
+                  </button>
+                ))}
+              </div>
+
+              <h2>{isAr ? 'كم ستكون الساعة…' : 'What Time Will It Be…'}</h2>
+              <h3>{t.minutes}</h3>
+              <div className="sd-chip-row sd-link-chips">
+                {CALC_MINUTES.map((m) => {
+                  const label = isAr ? `بعد ${m} دقيقة` : `${m} Minutes From Now`;
+                  return (
+                    <button
+                      key={`fn-m-${m}`}
+                      type="button"
+                      onClick={() => {
+                        setCalcSpec({ amount: m, unit: 'minute', dir: 1, title: label });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="chip"
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <h3>{t.hours}</h3>
+              <div className="sd-chip-row sd-link-chips">
+                {CALC_HOURS.map((h) => {
+                  const label = isAr
+                    ? `بعد ${h} ساعة`
+                    : `${h} ${h === 1 ? 'Hour' : 'Hours'} From Now`;
+                  return (
+                    <button
+                      key={`fn-h-${h}`}
+                      type="button"
+                      onClick={() => {
+                        setCalcSpec({ amount: h, unit: 'hour', dir: 1, title: label });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="chip"
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <h3>{t.days}</h3>
+              <div className="sd-chip-row sd-link-chips">
+                {CALC_DAYS.map((d) => {
+                  const label = isAr ? `بعد ${d} يوم` : `${d} Days From Now`;
+                  return (
+                    <button
+                      key={`fn-d-${d}`}
+                      type="button"
+                      onClick={() => {
+                        setCalcSpec({ amount: d, unit: 'day', dir: 1, title: label });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="chip"
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <h3>{isAr ? 'أسابيع' : 'Weeks'}</h3>
+              <div className="sd-chip-row sd-link-chips">
+                {CALC_WEEKS.map((w) => {
+                  const label = isAr
+                    ? `بعد ${w} أسبوع`
+                    : `${w} ${w === 1 ? 'Week' : 'Weeks'} From Now`;
+                  return (
+                    <button
+                      key={`fn-w-${w}`}
+                      type="button"
+                      onClick={() => {
+                        setCalcSpec({ amount: w, unit: 'week', dir: 1, title: label });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="chip"
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <h3>{isAr ? 'أشهر' : 'Months'}</h3>
+              <div className="sd-chip-row sd-link-chips">
+                {CALC_MONTHS.map((mo) => {
+                  const label = isAr
+                    ? `بعد ${mo} شهر`
+                    : `${mo} ${mo === 1 ? 'Month' : 'Months'} From Now`;
+                  return (
+                    <button
+                      key={`fn-mo-${mo}`}
+                      type="button"
+                      onClick={() => {
+                        setCalcSpec({ amount: mo, unit: 'month', dir: 1, title: label });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="chip"
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <h2>{isAr ? 'كم كانت الساعة…' : 'What Time Was It…'}</h2>
+              <h3>{t.minutes}</h3>
+              <div className="sd-chip-row sd-link-chips">
+                {CALC_MINUTES.map((m) => {
+                  const label = isAr ? `قبل ${m} دقيقة` : `${m} Minutes Ago`;
+                  return (
+                    <button
+                      key={`ago-m-${m}`}
+                      type="button"
+                      onClick={() => {
+                        setCalcSpec({ amount: m, unit: 'minute', dir: -1, title: label });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="chip"
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <h3>{t.hours}</h3>
+              <div className="sd-chip-row sd-link-chips">
+                {CALC_HOURS.map((h) => {
+                  const label = isAr
+                    ? `قبل ${h} ساعة`
+                    : `${h} ${h === 1 ? 'Hour' : 'Hours'} Ago`;
+                  return (
+                    <button
+                      key={`ago-h-${h}`}
+                      type="button"
+                      onClick={() => {
+                        setCalcSpec({ amount: h, unit: 'hour', dir: -1, title: label });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="chip"
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <h3>{t.days}</h3>
+              <div className="sd-chip-row sd-link-chips">
+                {CALC_DAYS.map((d) => {
+                  const label = isAr ? `قبل ${d} يوم` : `${d} Days Ago`;
+                  return (
+                    <button
+                      key={`ago-d-${d}`}
+                      type="button"
+                      onClick={() => {
+                        setCalcSpec({ amount: d, unit: 'day', dir: -1, title: label });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="chip"
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <h3>{isAr ? 'أسابيع' : 'Weeks'}</h3>
+              <div className="sd-chip-row sd-link-chips">
+                {CALC_WEEKS.map((w) => {
+                  const label = isAr
+                    ? `قبل ${w} أسبوع`
+                    : `${w} ${w === 1 ? 'Week' : 'Weeks'} Ago`;
+                  return (
+                    <button
+                      key={`ago-w-${w}`}
+                      type="button"
+                      onClick={() => {
+                        setCalcSpec({ amount: w, unit: 'week', dir: -1, title: label });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="chip"
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <h3>{isAr ? 'أشهر' : 'Months'}</h3>
+              <div className="sd-chip-row sd-link-chips">
+                {CALC_MONTHS.map((mo) => {
+                  const label = isAr
+                    ? `قبل ${mo} شهر`
+                    : `${mo} ${mo === 1 ? 'Month' : 'Months'} Ago`;
+                  return (
+                    <button
+                      key={`ago-mo-${mo}`}
+                      type="button"
+                      onClick={() => {
+                        setCalcSpec({ amount: mo, unit: 'month', dir: -1, title: label });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="chip"
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        ) : isAr ? (
+          <>
+            <h2>عرض رقمي بإيقاع ميكانيكي</h2>
             <p>
-              تعرض الساعة القلّابة الوقت الحالي بالساعات والدقائق والثواني على بطاقات ميكانيكية أنيقة تنقلب
-              بانتظام مع ساعة جهازك، بتباين واضح يسهل قراءته من أي مسافة دون تثبيت أي برامج.
+              تتبع الساعة توقيت جهازك وتعرضه على بطاقات كبيرة تنقسم إلى نصفين متحركين. يساعد التباين الواضح
+              على قراءة الأرقام من المكتب أو من مسافة أبعد، وتعمل الواجهة مباشرة في المتصفح.
             </p>
-            <h2>كيفية تخصيص عرض الساعة</h2>
+            <h2>اقرأ الوقت واضبط طريقة عرضه</h2>
             <p>
-              يتم تحديث الوقت تلقائياً وفق ساعة جهازك. افتح زر الإعدادات في الشريط العلوي لتخصيص المظهر:
+              يتحدّث العرض تلقائياً وفق ساعة الجهاز. افتح الإعدادات لتغيير التنسيق أو حجم البطاقات أو
+              التفاصيل التي تراها:
             </p>
             <ul>
               <li>تعديل حجم الساعة من 50% حتى 150%.</li>
@@ -645,102 +1287,186 @@ export const ClockPage: React.FC<ClockPageProps> = ({
           </>
         ) : (
           <>
-            <h2>What Is a Split-Flap Online Clock?</h2>
+            <h2>A mechanical rhythm for digital time</h2>
             <p>
-              A split-flap clock displays live hours, minutes, and seconds on mechanical-style cards that
-              turn in rhythm with your system clock. Inspired by classic station departure boards, this
-              browser display offers crisp legibility from across the room with zero installation.
+              The display follows your device clock and presents hours, minutes, and seconds on broad
+              hinged-style cards. High contrast keeps the numerals easy to scan at a desk or from farther
+              away, and the interface runs directly in your browser.
             </p>
 
-            <h2>How to Customize the Display</h2>
+            <h2>Read the time and choose its presentation</h2>
             <p>
-              Time updates automatically using your device clock. Open the gear icon in the top-right
-              bar to personalize how the cards appear:
+              The clock updates automatically. Open Settings to adjust its format, scale, card shape, and
+              supporting details:
             </p>
             <ul>
-              <li>Adjust the overall display scale from 50% to 150%.</li>
-              <li>Fine-tune card corner roundness from sharp edges to pill curves.</li>
-              <li>Show or hide the embedded flipping seconds counter.</li>
-              <li>Show or hide the calendar date and weekday labels.</li>
-              <li>Switch between 12-hour AM/PM and 24-hour time formats.</li>
+              <li>
+                <strong>Theme:</strong> Choose Dark, Light, Midnight, or Sand.
+              </li>
+              <li>
+                <strong>Flip Style:</strong> Pick Simple, Standard, or Professional card motion.
+              </li>
+              <li>
+                <strong>Clock Display:</strong> Toggle 24-hour time, seconds, and the date and day of the
+                week.
+              </li>
+              <li>
+                <strong>Clock Style:</strong> Set an automatic, horizontal, or vertical layout, scale the
+                size, and round or square off the card corners.
+              </li>
             </ul>
-            <p>
-              Press the fullscreen button—or hit <strong>F</strong> on your keyboard—to let the clock
-              fill your entire monitor.
-            </p>
+            <p>Your preferences are saved in this browser for your next visit.</p>
 
-            <h2>Why Keep a Minimalist Desk Clock?</h2>
-            <p>
-              Large high-contrast numerals make it effortless to pace meetings, study blocks, studio
-              recordings, or bedside routines on any laptop, tablet, or phone.
-            </p>
+            <h2>Move between the timing tools</h2>
+            <p>Use the dock to open another part of the suite whenever your task changes:</p>
+            <ul>
+              <li>
+                <a
+                  href="#/study-timer"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate?.('study');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                >
+                  Study Timer
+                </a>{' '}
+                — timed focus and break sessions with a task list and daily progress tracking.
+              </li>
+              <li>
+                <a
+                  href="#/timer"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate?.('timer');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                >
+                  Online Timer
+                </a>{' '}
+                — count down from quick presets or any custom hours, minutes, and seconds.
+              </li>
+              <li>
+                <a
+                  href="#/stopwatch"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate?.('stopwatch');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                >
+                  Online Stopwatch
+                </a>{' '}
+                — measure elapsed time to hundredths of a second and record laps.
+              </li>
+              <li>
+                <a
+                  href="#/countdown"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate?.('countdown');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                >
+                  Online Countdown
+                </a>{' '}
+                — track the days, hours, minutes, and seconds until a date or event.
+              </li>
+              <li>
+                <a
+                  href="#/alarm"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate?.('alarm');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                >
+                  Online Alarm Clock
+                </a>{' '}
+                — set one-time or repeating alarms with sound, gradual volume, and snooze.
+              </li>
+            </ul>
+
+            <h2>Plan a time in the near future</h2>
+            <p>Choose an interval to calculate a later time, then open the city comparison if useful:</p>
+            <div className="sd-chip-row sd-link-chips">
+              {[
+                { label: '15 minutes', amount: 15, unit: 'minute' as const },
+                { label: '30 minutes', amount: 30, unit: 'minute' as const },
+                { label: '45 minutes', amount: 45, unit: 'minute' as const },
+                { label: '1 hour', amount: 1, unit: 'hour' as const },
+                { label: '2 hours', amount: 2, unit: 'hour' as const },
+                { label: '8 hours', amount: 8, unit: 'hour' as const },
+                { label: '12 hours', amount: 12, unit: 'hour' as const },
+                { label: '24 hours', amount: 24, unit: 'hour' as const },
+                { label: '48 hours', amount: 48, unit: 'hour' as const },
+                { label: '7 days', amount: 7, unit: 'day' as const },
+                { label: '30 days', amount: 30, unit: 'day' as const },
+                { label: '90 days', amount: 90, unit: 'day' as const },
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => {
+                    setWorldMode(true);
+                    setCalcSpec({
+                      amount: item.amount,
+                      unit: item.unit,
+                      dir: 1,
+                      title: `${item.label.replace(/^\w/, (c) => c.toUpperCase())} From Now`,
+                    });
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="chip"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+
+            <h2>Keep time easy to check</h2>
+            <ul>
+              <li>
+                <strong>Clear numerals:</strong> Large cards make a quick glance useful from nearby or
+                farther away.
+              </li>
+              <li>
+                <strong>Flexible screen layouts:</strong> The display adapts to phones, tablets, laptops,
+                and larger monitors in portrait or landscape.
+              </li>
+              <li>
+                <strong>Preferences stay local:</strong> The suite runs in your browser and saves display
+                choices on this device.
+              </li>
+            </ul>
           </>
         )}
-
-        <div className="link-directory">
-          <h3>{t.timeFromNow}</h3>
-          <div className="chip-row link-chips">
-            {MINUTES_LINKS.map((m) => (
-              <button
-                key={`m-${m}`}
-                type="button"
-                onClick={() => onQuickTimer(m * 60)}
-                className="chip"
-              >
-                {isAr ? `بعد ${m} دقيقة` : `${m} minutes from now`}
-              </button>
-            ))}
-            {HOURS_LINKS.map((h) => (
-              <button
-                key={`h-${h}`}
-                type="button"
-                onClick={() => onQuickTimer(h * 3600)}
-                className="chip"
-              >
-                {isAr ? `بعد ${h} ساعة` : `${h} ${h === 1 ? 'hour' : 'hours'} from now`}
-              </button>
-            ))}
-          </div>
-
-          <h3>{t.daysFromToday}</h3>
-          <div className="chip-row link-chips">
-            {DAYS_LINKS.map((d) => (
-              <button
-                key={`d-${d}`}
-                type="button"
-                onClick={() => onQuickCountdownDays(d)}
-                className="chip"
-              >
-                {isAr ? `بعد ${d} يوم` : `${d} days from today`}
-              </button>
-            ))}
-          </div>
-        </div>
       </article>
 
-      {/* City Picker Modal */}
+      {/* Searchable city picker modal. */}
       {cityModalOpen ? (
-        <div className="modal-overlay" onClick={() => setCityModalOpen(false)}>
+        <div className="sd-modal-overlay visible" onClick={() => setCityModalOpen(false)}>
           <div
             role="dialog"
             aria-modal="true"
             aria-label={t.yourCities}
-            className="world-dialog-card"
+            className="sd-world-dialog-card"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="panel-title">{t.yourCities}</h2>
+            <div className="sd-world-dialog-head">
+              <h2 className="sd-panel-title">{t.yourCities}</h2>
               <button
                 type="button"
                 onClick={() => setCityModalOpen(false)}
-                className="icon-button"
+                className="sd-icon-button"
                 aria-label="Close city picker"
               >
-                <X className="w-[20px] h-[20px]" />
+                <Icon name="close" />
               </button>
             </div>
 
             <input
+              ref={searchInputRef}
               type="search"
               value={cityQuery}
               onChange={(e) => setCityQuery(e.target.value)}
@@ -749,41 +1475,44 @@ export const ClockPage: React.FC<ClockPageProps> = ({
               className="input"
             />
 
-            <ul className="city-options">
-              {filteredModalCities.map((spec) => {
-                const added = savedSlugs.includes(spec.slug);
-                return (
-                  <li key={spec.slug}>
-                    <button
-                      type="button"
-                      aria-pressed={added}
-                      onClick={() => {
-                        setSavedSlugs((prev) =>
-                          prev.includes(spec.slug)
-                            ? prev.filter((s) => s !== spec.slug)
-                            : [...prev, spec.slug]
-                        );
-                      }}
-                      className="city-option"
-                    >
-                      <span className="flex flex-col min-w-0">
-                        <span className="text-[16px] font-medium">{cityName(spec)}</span>
-                        <span className="text-[13px]" style={{ color: 'var(--text-3)' }}>
-                          {countryName(spec)} · <span dir="ltr">{formatShortTime(baseNow, spec.tz, settings.use24Hour)}</span>
+            {filteredModalCities.length === 0 ? (
+              <p className="sd-empty-state mt-4">{t.noPlacesFound}</p>
+            ) : (
+              <ul className="sd-city-options">
+                {filteredModalCities.map((spec) => {
+                  const added = savedSlugs.includes(spec.slug);
+                  return (
+                    <li key={spec.slug}>
+                      <button
+                        type="button"
+                        aria-pressed={added}
+                        onClick={() => {
+                          setSavedSlugs((prev) =>
+                            prev.includes(spec.slug)
+                              ? prev.filter((s) => s !== spec.slug)
+                              : [...prev, spec.slug]
+                          );
+                        }}
+                        className="sd-city-option w-full"
+                      >
+                        <span className="sd-city-option-name">
+                          <span>{cityName(spec)}</span>
+                          <span className="muted">
+                            {countryName(spec)} ·{' '}
+                            <span dir="ltr">
+                              {formatShortTime(baseNow, spec.tz, settings.use24Hour)}
+                            </span>
+                          </span>
                         </span>
-                      </span>
-                      <span className="city-option-icon">
-                        {added ? (
-                          <Check className="w-[16px] h-[16px]" />
-                        ) : (
-                          <Plus className="w-[16px] h-[16px]" />
-                        )}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+                        <span className="sd-city-option-icon">
+                          <Icon name={added ? 'check' : 'add'} />
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
         </div>
       ) : null}

@@ -1,202 +1,172 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { BellRing } from 'lucide-react';
-import { Footer } from './components/Footer';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { HeaderNav } from './components/HeaderNav';
 import { SettingsDrawer } from './components/SettingsDrawer';
-import { ALARMS_STORAGE_KEY, AlarmPage, formatAlarmDisplay } from './pages/AlarmPage';
+import { Footer } from './components/Footer';
+import { Icon } from './components/Icon';
 import { ClockPage } from './pages/ClockPage';
-import { CountdownPage } from './pages/CountdownPage';
-import { StopwatchPage } from './pages/StopwatchPage';
 import { StudyPage } from './pages/StudyPage';
 import { TimerPage } from './pages/TimerPage';
+import { StopwatchPage } from './pages/StopwatchPage';
+import { CountdownPage } from './pages/CountdownPage';
+import { AlarmPage, formatAlarmDisplay } from './pages/AlarmPage';
 import { DEFAULT_SETTINGS, type AlarmItem, type AppSettings, type RouteKey } from './types';
+import { readStorage, writeStorage } from './utils/storage';
 import {
   sendDesktopNotification,
   startAlarmLoop,
   stopAlarmLoop,
+  unlockAudioContext,
+  vibrateIfAvailable,
 } from './utils/soundEngine';
-import { readStorage, writeStorage } from './utils/storage';
+import { useScreenWakeLock } from './utils/wakeLock';
 import { getLanguageMeta, getStrings } from './i18n';
 
-const SETTINGS_STORAGE_KEY = 'splitflap_settings_v2';
-const NAV_STATE_STORAGE_KEY = 'splitflap_nav_state_v2';
+const SETTINGS_KEY = 'splitdeck:v1:settings';
+const NAVIGATION_KEY = 'splitdeck:v1:navigation';
+const ALARMS_KEY = 'splitdeck:v1:alarms';
+const MAX_RING_MS = 15 * 60 * 1000;
 
-interface PersistedNavState {
+const VALID_ROUTES: RouteKey[] = ['clock', 'study', 'timer', 'stopwatch', 'countdown', 'alarm'];
+
+interface PersistedNavigation {
   activeRoute: RouteKey;
   worldMode: boolean;
 }
 
-function parseExplicitHash(hash: string): { route: RouteKey; world?: boolean } | null {
-  const cleaned = hash.replace(/^#\/?/, '').replace(/\/$/, '').toLowerCase();
-  if (!cleaned) return null;
-  switch (cleaned) {
-    case 'clock':
-      return { route: 'clock', world: false };
-    case 'time':
-    case 'world-clock':
-      return { route: 'clock', world: true };
-    case 'study-timer':
-    case 'study':
-      return { route: 'study' };
-    case 'timer':
-      return { route: 'timer' };
-    case 'stopwatch':
-      return { route: 'stopwatch' };
-    case 'countdown':
-      return { route: 'countdown' };
-    case 'alarm':
-      return { route: 'alarm' };
-    default:
-      return null;
+function readSavedNavigation(): { route: RouteKey; worldMode: boolean } {
+  const saved = readStorage<Partial<PersistedNavigation>>(NAVIGATION_KEY, {});
+  const route = VALID_ROUTES.includes(saved.activeRoute as RouteKey)
+    ? (saved.activeRoute as RouteKey)
+    : 'clock';
+  return { route, worldMode: route === 'clock' && saved.worldMode === true };
+}
+
+function parseHashState(): { route: RouteKey; worldMode: boolean } | null {
+  const raw = window.location.hash.replace(/^#\/?/, '').toLowerCase().trim();
+  if (!raw) return null;
+  if (raw === 'world-clock' || raw === 'time') {
+    return { route: 'clock', worldMode: true };
   }
-}
-
-function routeToHash(route: RouteKey, worldMode = false): string {
-  switch (route) {
-    case 'study':
-      return '#/study-timer';
-    case 'timer':
-      return '#/timer';
-    case 'stopwatch':
-      return '#/stopwatch';
-    case 'countdown':
-      return '#/countdown';
-    case 'alarm':
-      return '#/alarm';
-    default:
-      return worldMode ? '#/world-clock' : '#/';
+  if (raw === 'study-timer') {
+    return { route: 'study', worldMode: false };
   }
+  if ((VALID_ROUTES as string[]).includes(raw)) {
+    return { route: raw as RouteKey, worldMode: false };
+  }
+  return { route: 'clock', worldMode: false };
 }
 
-function getNativeFullscreenElement(): Element | null {
-  if (typeof document === 'undefined') return null;
-  const doc = document as Document & { webkitFullscreenElement?: Element | null };
-  return doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
-}
+export function App() {
+  // Request a screen wake lock while timing tools are active when the browser supports it.
+  useScreenWakeLock(true);
 
-function isInteractiveTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  return Boolean(
-    target.closest(
-      'button, a, input, select, textarea, label, [role="dialog"], [role="alertdialog"]'
-    )
-  );
-}
-
-export const App: React.FC = () => {
-  const initialNav = (() => {
-    const saved = readStorage<PersistedNavState>(NAV_STATE_STORAGE_KEY, {
-      activeRoute: 'clock',
-      worldMode: false,
-    });
-    if (typeof window !== 'undefined') {
-      const fromHash = parseExplicitHash(window.location.hash);
-      if (fromHash) {
-        return {
-          activeRoute: fromHash.route,
-          worldMode: fromHash.world ?? (fromHash.route === 'clock' ? saved.worldMode : false),
-        };
-      }
-    }
-    const validRoutes: RouteKey[] = ['clock', 'study', 'timer', 'stopwatch', 'countdown', 'alarm'];
-    const route = validRoutes.includes(saved.activeRoute) ? saved.activeRoute : 'clock';
-    return {
-      activeRoute: route,
-      worldMode: route === 'clock' ? Boolean(saved.worldMode) : false,
-    };
-  })();
-
-  const [activeRoute, setActiveRoute] = useState<RouteKey>(initialNav.activeRoute);
-  const [worldMode, setWorldModeState] = useState<boolean>(initialNav.worldMode);
+  const initialNavigation = parseHashState() ?? readSavedNavigation();
+  const [route, setRoute] = useState<RouteKey>(initialNavigation.route);
+  const [worldMode, setWorldMode] = useState<boolean>(initialNavigation.worldMode);
 
   const [settings, setSettings] = useState<AppSettings>(() => {
-    const saved = readStorage<Partial<AppSettings>>(SETTINGS_STORAGE_KEY, {});
-    const merged = { ...DEFAULT_SETTINGS, ...saved };
+    const stored = readStorage<Partial<AppSettings>>(SETTINGS_KEY, {});
+    const merged = { ...DEFAULT_SETTINGS, ...stored };
     if ((merged.flipStyle as string) === 'professional') {
       merged.flipStyle = 'pro';
     }
-    const validProfiles = [
-      'bell',
+    const validSoundProfiles = [
+      'siren',
+      'airhorn',
+      'airraid',
+      'firetruck',
+      'firebell',
+      'rooster',
       'piano',
+      'bell',
+      'guitar',
       'melody',
-      'chime',
-      'sunrise',
+      'kalimba',
       'harmony',
+      'sunrise',
+      'chime',
       'crystal',
       'beacon',
       'digital',
       'classic',
     ];
-    if (!validProfiles.includes(merged.soundProfile)) {
+    if (!validSoundProfiles.includes(merged.soundProfile)) {
       merged.soundProfile = 'bell';
     }
     return merged;
   });
 
-  const [alarms, setAlarms] = useState<AlarmItem[]>(() =>
-    readStorage<AlarmItem[]>(ALARMS_STORAGE_KEY, [])
-  );
-  const [ringingAlarm, setRingingAlarm] = useState<AlarmItem | null>(null);
-
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [fsExitVisible, setFsExitVisible] = useState(false);
-  const [quickTimerSec, setQuickTimerSec] = useState<number | null>(null);
+
+  const [alarms, setAlarms] = useState<AlarmItem[]>(() =>
+    readStorage<AlarmItem[]>(ALARMS_KEY, [])
+  );
+  const [ringingAlarm, setRingingAlarm] = useState<AlarmItem | null>(null);
+  const lastTriggeredMinuteRef = useRef<Record<string, string>>({});
+  const ringCapTimerRef = useRef<number | null>(null);
+  const vibrateIntervalRef = useRef<number | null>(null);
+
+  const [quickTimerSecs, setQuickTimerSecs] = useState<number | null>(null);
   const [quickCountdownDays, setQuickCountdownDays] = useState<number | null>(null);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [toastIsFs, setToastIsFs] = useState(false);
+  const [toast, setToast] = useState<{ text: string; variant: 'default' | 'error' } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
 
-  const fsHoverTimerRef = useRef<number | null>(null);
-  const lastTouchTapRef = useRef<number>(0);
+  const showToast = useCallback(
+    (msg: string, variant: 'default' | 'error' = 'default') => {
+      setToast({ text: msg, variant });
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = window.setTimeout(() => setToast(null), 3200);
+    },
+    []
+  );
 
-  const t = getStrings(settings.language);
-  const langMeta = getLanguageMeta(settings.language);
+  // Persist preferences and apply the active theme and text direction to the document.
+  useEffect(() => {
+    writeStorage(SETTINGS_KEY, settings);
+    const root = document.documentElement;
+    const body = document.body;
+    const langMeta = getLanguageMeta(settings.language);
 
-  const showToast = useCallback((msg: string, isFsToast = false) => {
-    setToastIsFs(isFsToast);
-    setToastMsg(msg);
-  }, []);
+    root.lang = langMeta.bcp47;
+    root.dir = langMeta.dir;
+
+    const colorFamily =
+      settings.theme === 'light' || settings.theme === 'sand' ? 'light' : 'dark';
+
+    root.setAttribute('data-theme', settings.theme);
+    body.setAttribute('data-theme', settings.theme);
+    body.setAttribute('data-mode', colorFamily);
+    body.setAttribute('data-look', settings.flipStyle);
+    body.setAttribute('data-layout', settings.layout);
+
+    body.classList.toggle('format-24', settings.use24Hour);
+    body.classList.toggle('hide-seconds', !settings.showSeconds);
+    body.classList.toggle('hide-date-day', !settings.showDateAndDay);
+
+    const grow = settings.sizePercent > 100 ? (settings.sizePercent - 100) / 50 : 0;
+    const shrink = settings.sizePercent < 100 ? settings.sizePercent / 100 : 1;
+    root.style.setProperty('--display-grow', grow.toFixed(3));
+    root.style.setProperty('--display-shrink', shrink.toFixed(3));
+    root.style.setProperty('--clock-radius', String(settings.cornerRadius));
+  }, [settings]);
 
   useEffect(() => {
-    if (!toastMsg) return;
-    const timer = window.setTimeout(() => setToastMsg(null), 2600);
-    return () => window.clearTimeout(timer);
-  }, [toastMsg]);
+    document.body.classList.toggle('settings-open', settingsOpen);
+  }, [settingsOpen]);
 
-  // Persist route & worldMode across refreshes and sync URL hash
+  // Unlock WebAudio on first user gesture
   useEffect(() => {
-    writeStorage<PersistedNavState>(NAV_STATE_STORAGE_KEY, {
-      activeRoute,
-      worldMode: activeRoute === 'clock' ? worldMode : false,
-    });
-    const desiredHash = routeToHash(activeRoute, activeRoute === 'clock' && worldMode);
-    if (window.location.hash !== desiredHash) {
-      try {
-        window.history.replaceState(null, '', desiredHash);
-      } catch {
-        // ignore sandbox history errors
-      }
-    }
-  }, [activeRoute, worldMode]);
-
-  useEffect(() => {
-    const onHashChange = () => {
-      const parsed = parseExplicitHash(window.location.hash);
-      if (parsed) {
-        setActiveRoute(parsed.route);
-        if (typeof parsed.world === 'boolean') {
-          setWorldModeState(parsed.world);
-        }
-      } else if (window.location.hash === '#/' || window.location.hash === '#') {
-        setActiveRoute('clock');
-        setWorldModeState(false);
-      }
+    const unlock = () => unlockAudioContext();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
     };
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
-  // Header scroll border class (1:1 aflipclock.com body.scrolled)
+  // Scroll listener for subtle header border
   useEffect(() => {
     const onScroll = () => {
       document.body.classList.toggle('scrolled', window.scrollY > 8);
@@ -206,307 +176,340 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  const setWorldMode = useCallback((open: boolean) => {
-    setWorldModeState(open);
-  }, []);
-
-  const navigate = useCallback((route: RouteKey) => {
-    setActiveRoute(route);
-    if (route !== 'clock') setWorldModeState(false);
-  }, []);
-
-  // Persist alarms globally and monitor system clock across ALL pages
+  // Sync URL navigation, including browser Back/Forward, with the active tool.
   useEffect(() => {
-    writeStorage(ALARMS_STORAGE_KEY, alarms);
+    const onUrlChange = () => {
+      const parsed = parseHashState();
+      const next = parsed ?? { route: 'clock' as const, worldMode: false };
+      setRoute(next.route);
+      setWorldMode(next.worldMode);
+    };
+    window.addEventListener('hashchange', onUrlChange);
+    window.addEventListener('popstate', onUrlChange);
+    return () => {
+      window.removeEventListener('hashchange', onUrlChange);
+      window.removeEventListener('popstate', onUrlChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    writeStorage<PersistedNavigation>(NAVIGATION_KEY, { activeRoute: route, worldMode });
+  }, [route, worldMode]);
+
+  const navigate = useCallback((next: RouteKey) => {
+    setRoute(next);
+    if (next !== 'clock') {
+      setWorldMode(false);
+    }
+    const targetHash = `#/${next}`;
+    if (window.location.hash !== targetHash) {
+      window.history.pushState(null, '', targetHash);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const handleSetWorldMode = useCallback((open: boolean) => {
+    setRoute('clock');
+    setWorldMode(open);
+    const targetHash = open ? '#/world-clock' : '#/clock';
+    if (window.location.hash !== targetHash) {
+      window.history.pushState(null, '', targetHash);
+    }
+  }, []);
+
+  const handleNavigateToSection = useCallback(
+    (targetRoute: RouteKey, sectionId?: string, openWorldClock?: boolean) => {
+      if (targetRoute === 'clock' && openWorldClock !== undefined) {
+        handleSetWorldMode(openWorldClock);
+      } else {
+        setRoute(targetRoute);
+        setWorldMode(false);
+        const targetHash = `#/${targetRoute}`;
+        if (window.location.hash !== targetHash) {
+          window.history.pushState(null, '', targetHash);
+        }
+      }
+
+      if (sectionId) {
+        window.setTimeout(() => {
+          const el = document.getElementById(sectionId);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        }, 60);
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    },
+    [handleSetWorldMode]
+  );
+
+  // Persist alarms
+  useEffect(() => {
+    writeStorage(ALARMS_KEY, alarms);
   }, [alarms]);
 
-  useEffect(() => {
-    let timerId: number;
-    let vibTimer: number | null = null;
-
-    const tick = () => {
-      const current = new Date();
-      const h = current.getHours();
-      const m = current.getMinutes();
-      const dow = current.getDay();
-      const key = `${current.getFullYear()}-${current.getMonth()}-${current.getDate()}-${h}-${m}`;
-
-      setAlarms((prev) => {
-        let fired: AlarmItem | null = null;
-        let changed = false;
-
-        const updated = prev.map((al) => {
-          if (!fired && al.snoozeUntil && current.getTime() >= al.snoozeUntil) {
-            fired = al;
-            changed = true;
-            return { ...al, snoozeUntil: undefined };
-          }
-          if (!fired && al.enabled) {
-            const matchesDay = al.days.length === 0 || al.days.includes(dow);
-            if (matchesDay && al.hour24 === h && al.minute === m && al.lastTriggeredKey !== key) {
-              fired = al;
-              changed = true;
-              return { ...al, lastTriggeredKey: key };
-            }
-          }
-          return al;
-        });
-
-        if (fired) {
-          const targetAlarm = fired as AlarmItem;
-          window.setTimeout(() => {
-            setRingingAlarm(targetAlarm);
-            startAlarmLoop(
-              settings.soundProfile,
-              Math.max(10, settings.volume),
-              settings.gradualVolume
-            );
-            sendDesktopNotification(
-              targetAlarm.label || t.dockAlarm,
-              formatAlarmDisplay(targetAlarm.hour24, targetAlarm.minute, settings.use24Hour)
-            );
-            if (targetAlarm.vibrate && 'vibrate' in navigator) {
-              try {
-                navigator.vibrate([300, 180, 300]);
-                vibTimer = window.setInterval(() => {
-                  try {
-                    navigator.vibrate([300, 180, 300]);
-                  } catch {
-                    // ignore
-                  }
-                }, 2000);
-              } catch {
-                // ignore
-              }
-            }
-          }, 0);
-        }
-        return changed ? updated : prev;
-      });
-
-      timerId = window.setTimeout(tick, 1000 - (Date.now() % 1000) + 5);
-    };
-
-    timerId = window.setTimeout(tick, 1000 - (Date.now() % 1000) + 5);
-    return () => {
-      window.clearTimeout(timerId);
-      if (vibTimer !== null) window.clearInterval(vibTimer);
-    };
-  }, [settings.soundProfile, settings.volume, settings.gradualVolume, settings.use24Hour, t.dockAlarm]);
-
-  const handleDismissRingingAlarm = useCallback(() => {
-    if (ringingAlarm) {
-      setAlarms((prev) =>
-        prev.map((al) => {
-          if (al.id !== ringingAlarm.id) return al;
-          return {
-            ...al,
-            snoozeUntil: undefined,
-            enabled: al.days.length === 0 ? false : al.enabled,
-          };
-        })
-      );
+  const clearAlarmTimers = useCallback(() => {
+    if (ringCapTimerRef.current !== null) {
+      window.clearTimeout(ringCapTimerRef.current);
+      ringCapTimerRef.current = null;
     }
-    if ('vibrate' in navigator) {
-      try {
-        navigator.vibrate(0);
-      } catch {
-        // ignore
-      }
+    const hadVibration = vibrateIntervalRef.current !== null;
+    if (vibrateIntervalRef.current !== null) {
+      window.clearInterval(vibrateIntervalRef.current);
+      vibrateIntervalRef.current = null;
     }
-    stopAlarmLoop();
-    setRingingAlarm(null);
-  }, [ringingAlarm]);
-
-  const handleSnoozeRingingAlarm = useCallback(() => {
-    if (!ringingAlarm) return;
-    if ('vibrate' in navigator) {
-      try {
-        navigator.vibrate(0);
-      } catch {
-        // ignore
-      }
-    }
-    stopAlarmLoop();
-    const until = Date.now() + settings.snoozeMinutes * 60000;
-    const untilDate = new Date(until);
-    setAlarms((prev) =>
-      prev.map((al) => (al.id === ringingAlarm.id ? { ...al, snoozeUntil: until } : al))
-    );
-    showToast(
-      `${t.snooze}: ${formatAlarmDisplay(
-        untilDate.getHours(),
-        untilDate.getMinutes(),
-        settings.use24Hour
-      )}`
-    );
-    setRingingAlarm(null);
-  }, [ringingAlarm, settings.snoozeMinutes, settings.use24Hour, showToast, t.snooze]);
-
-  // Sync Flip Clock v2 Body Attributes, Language/RTL, Classes & CSS Variables
-  useEffect(() => {
-    writeStorage(SETTINGS_STORAGE_KEY, settings);
-
-    const body = document.body;
-    const root = document.documentElement;
-    const isLight = settings.theme === 'light' || settings.theme === 'sand';
-
-    root.lang = langMeta.bcp47;
-    root.dir = langMeta.dir;
-    body.dataset.dir = langMeta.dir;
-
-    body.dataset.theme = settings.theme;
-    body.dataset.mode = isLight ? 'light' : 'dark';
-    body.dataset.look = settings.flipStyle;
-    body.dataset.layout = settings.layout;
-
-    body.classList.toggle('format-24', settings.use24Hour);
-    body.classList.toggle('hide-seconds', !settings.showSeconds);
-    body.classList.toggle('hide-date-day', !settings.showDateAndDay);
-
-    root.style.setProperty('--clock-radius', String(settings.cornerRadius));
-
-    const size = settings.sizePercent;
-    const grow = size > 100 ? (size - 100) / 50 : 0;
-    const shrink = size < 100 ? size / 100 : 1;
-    root.style.setProperty('--display-grow', String(grow));
-    root.style.setProperty('--display-shrink', String(shrink));
-  }, [settings, langMeta]);
-
-  useEffect(() => {
-    document.body.classList.toggle('settings-open', settingsOpen);
-  }, [settingsOpen]);
-
-  const enterFullscreenState = useCallback(() => {
-    setIsFullscreen(true);
-    setFsExitVisible(false);
-    document.body.classList.add('fullscreen-active');
-    window.scrollTo({ top: 0, behavior: 'auto' });
-    showToast(t.fullscreenExitToast, true);
-  }, [showToast, t.fullscreenExitToast]);
-
-  const exitFullscreenState = useCallback(() => {
-    setIsFullscreen(false);
-    setFsExitVisible(false);
-    document.body.classList.remove('fullscreen-active');
+    if (hadVibration) vibrateIfAvailable(0);
   }, []);
 
-  const exitFullscreen = useCallback(() => {
-    const nativeEl = getNativeFullscreenElement();
-    if (nativeEl) {
-      const doc = document as Document & { webkitExitFullscreen?: () => Promise<void> | void };
-      try {
-        const res = doc.exitFullscreen ? doc.exitFullscreen() : doc.webkitExitFullscreen?.();
-        if (res && typeof (res as Promise<void>).finally === 'function') {
-          (res as Promise<void>).finally(() => exitFullscreenState());
+  // Background alarm & snooze monitor across ALL tabs + resync on visibilitychange
+  useEffect(() => {
+    const checkAlarms = () => {
+      if (ringingAlarm) return;
+      const now = new Date();
+      const h = now.getHours();
+      const m = now.getMinutes();
+      const day = now.getDay();
+      const minuteStamp = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${h}-${m}`;
+
+      for (const alarm of alarms) {
+        if (alarm.snoozeUntil && now.getTime() >= alarm.snoozeUntil) {
+          setRingingAlarm(alarm);
+          startAlarmLoop(
+            settings.soundProfile,
+            Math.max(10, settings.volume),
+            settings.gradualVolume
+          );
+          clearAlarmTimers();
+          if (alarm.vibrate && vibrateIfAvailable([400, 200, 400])) {
+            vibrateIntervalRef.current = window.setInterval(() => {
+              vibrateIfAvailable([400, 200, 400]);
+            }, 2000);
+          }
+          ringCapTimerRef.current = window.setTimeout(() => {
+            stopAlarmLoop();
+            clearAlarmTimers();
+          }, MAX_RING_MS);
+          sendDesktopNotification(
+            'Alarm',
+            alarm.label || formatAlarmDisplay(alarm.hour24, alarm.minute, settings.use24Hour)
+          );
           return;
         }
-      } catch {
-        // fall through
-      }
-    }
-    exitFullscreenState();
-  }, [exitFullscreenState]);
 
-  const enterFullscreen = useCallback(() => {
-    const rootEl = document.documentElement as HTMLElement & {
-      webkitRequestFullscreen?: () => Promise<void> | void;
-    };
-    const req = rootEl.requestFullscreen
-      ? () => rootEl.requestFullscreen()
-      : rootEl.webkitRequestFullscreen
-      ? () => Promise.resolve(rootEl.webkitRequestFullscreen?.())
-      : null;
+        if (!alarm.enabled) continue;
+        if (alarm.hour24 === h && alarm.minute === m) {
+          const matchesDay = alarm.days.length === 0 || alarm.days.includes(day);
+          if (!matchesDay) continue;
+          if (lastTriggeredMinuteRef.current[alarm.id] === minuteStamp) continue;
 
-    if (req) {
-      try {
-        Promise.resolve(req())
-          .then(() => {
-            enterFullscreenState();
-          })
-          .catch(() => {
-            // Sandboxed iframe / mobile browser fallback: pure 1:1 CSS fullscreen
-            enterFullscreenState();
-          });
-        return;
-      } catch {
-        // fall through to CSS fullscreen
-      }
-    }
-    enterFullscreenState();
-  }, [enterFullscreenState]);
-
-  const toggleFullscreen = useCallback(() => {
-    if (isFullscreen || getNativeFullscreenElement()) {
-      exitFullscreen();
-    } else {
-      enterFullscreen();
-    }
-  }, [isFullscreen, enterFullscreen, exitFullscreen]);
-
-  useEffect(() => {
-    const onFsChange = () => {
-      const active = Boolean(getNativeFullscreenElement());
-      if (active) {
-        setIsFullscreen(true);
-        document.body.classList.add('fullscreen-active');
-      } else {
-        exitFullscreenState();
+          lastTriggeredMinuteRef.current[alarm.id] = minuteStamp;
+          setRingingAlarm(alarm);
+          startAlarmLoop(
+            settings.soundProfile,
+            Math.max(10, settings.volume),
+            settings.gradualVolume
+          );
+          clearAlarmTimers();
+          if (alarm.vibrate && vibrateIfAvailable([400, 200, 400])) {
+            vibrateIntervalRef.current = window.setInterval(() => {
+              vibrateIfAvailable([400, 200, 400]);
+            }, 2000);
+          }
+          ringCapTimerRef.current = window.setTimeout(() => {
+            stopAlarmLoop();
+            clearAlarmTimers();
+          }, MAX_RING_MS);
+          sendDesktopNotification(
+            'Alarm',
+            alarm.label || formatAlarmDisplay(alarm.hour24, alarm.minute, settings.use24Hour)
+          );
+          return;
+        }
       }
     };
-    const onKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if ((e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        e.preventDefault();
-        toggleFullscreen();
-      } else if (e.key === 'Escape' && isFullscreen && !settingsOpen && !ringingAlarm) {
-        exitFullscreen();
-      }
+
+    checkAlarms();
+    const id = window.setInterval(checkAlarms, 1000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') checkAlarms();
     };
-    document.addEventListener('fullscreenchange', onFsChange);
-    document.addEventListener('webkitfullscreenchange', onFsChange as EventListener);
-    window.addEventListener('keydown', onKeyDown);
+    document.addEventListener('visibilitychange', onVis);
     return () => {
-      document.removeEventListener('fullscreenchange', onFsChange);
-      document.removeEventListener('webkitfullscreenchange', onFsChange as EventListener);
-      window.removeEventListener('keydown', onKeyDown);
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
     };
-  }, [isFullscreen, settingsOpen, ringingAlarm, toggleFullscreen, exitFullscreen, exitFullscreenState]);
+  }, [alarms, ringingAlarm, settings, clearAlarmTimers]);
 
-  // Auto-reveal subtle exit button on pointer movement while in Fullscreen, hide after 2.2s idle
+  // Clean up vibration/cap timer whenever ringingAlarm clears
   useEffect(() => {
-    if (!isFullscreen) {
-      setFsExitVisible(false);
-      if (fsHoverTimerRef.current !== null) {
-        window.clearTimeout(fsHoverTimerRef.current);
-        fsHoverTimerRef.current = null;
+    if (!ringingAlarm) {
+      clearAlarmTimers();
+    }
+  }, [ringingAlarm, clearAlarmTimers]);
+
+  // Update the tab title during an active alarm and allow Escape to dismiss it.
+  const t = getStrings(settings.language);
+  useEffect(() => {
+    if (!ringingAlarm) return;
+    const prevTitle = document.title;
+    const timeLabel = formatAlarmDisplay(
+      ringingAlarm.hour24,
+      ringingAlarm.minute,
+      settings.use24Hour
+    );
+    document.title = `⏰ ${timeLabel} · ${t.headerAlarm}`;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setAlarms((prev) =>
+          prev.map((al) =>
+            al.id === ringingAlarm.id
+              ? {
+                  ...al,
+                  snoozeUntil: undefined,
+                  enabled: al.days.length === 0 ? false : al.enabled,
+                }
+              : al
+          )
+        );
+        stopAlarmLoop();
+        clearAlarmTimers();
+        setRingingAlarm(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.title = prevTitle;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [ringingAlarm, settings.use24Hour, t.headerAlarm, clearAlarmTimers]);
+
+  // Support native fullscreen and a CSS fallback, with keyboard and touch exit controls.
+  const toggleFullscreen = useCallback(async () => {
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element;
+      webkitExitFullscreen?: () => Promise<void>;
+    };
+    const rootEl = document.documentElement as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void>;
+    };
+
+    const nativeActive = Boolean(document.fullscreenElement || doc.webkitFullscreenElement);
+    const pseudoActive = document.body.classList.contains('fullscreen-active');
+
+    if (nativeActive || pseudoActive) {
+      document.body.classList.remove('fullscreen-active');
+      setIsFullscreen(false);
+      if (nativeActive) {
+        try {
+          if (document.exitFullscreen) await document.exitFullscreen();
+          else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen();
+        } catch {
+          // CSS fallback already exited
+        }
       }
       return;
     }
 
-    const revealTemporarily = () => {
-      setFsExitVisible(true);
-      if (fsHoverTimerRef.current !== null) {
-        window.clearTimeout(fsHoverTimerRef.current);
+    let enteredNative = false;
+    try {
+      if (rootEl.requestFullscreen) {
+        await rootEl.requestFullscreen();
+        enteredNative = Boolean(document.fullscreenElement);
+      } else if (rootEl.webkitRequestFullscreen) {
+        await rootEl.webkitRequestFullscreen();
+        enteredNative = Boolean(doc.webkitFullscreenElement);
       }
-      fsHoverTimerRef.current = window.setTimeout(() => {
-        setFsExitVisible(false);
-      }, 2200);
-    };
+    } catch {
+      enteredNative = false;
+    }
 
-    window.addEventListener('mousemove', revealTemporarily, { passive: true });
+    document.body.classList.add('fullscreen-active');
+    setIsFullscreen(true);
+    showToast(t.fullscreenExitToast);
+    if (!enteredNative) {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
+  }, [showToast, t.fullscreenExitToast]);
+
+  useEffect(() => {
+    const onFsChange = () => {
+      const doc = document as Document & { webkitFullscreenElement?: Element };
+      const active = Boolean(document.fullscreenElement || doc.webkitFullscreenElement);
+      setIsFullscreen(active);
+      document.body.classList.toggle('fullscreen-active', active);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'Escape' && document.body.classList.contains('fullscreen-active')) {
+        const doc = document as Document & { webkitFullscreenElement?: Element };
+        if (!document.fullscreenElement && !doc.webkitFullscreenElement) {
+          document.body.classList.remove('fullscreen-active');
+          setIsFullscreen(false);
+        }
+        return;
+      }
+      if (
+        (e.key === 'f' || e.key === 'F') &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !settingsOpen
+      ) {
+        e.preventDefault();
+        toggleFullscreen();
+      }
+    };
+    const onDblClick = (e: MouseEvent) => {
+      if (!document.body.classList.contains('fullscreen-active')) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('button, a, input, select, textarea')) return;
+      toggleFullscreen();
+    };
+    let lastTap = 0;
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!document.body.classList.contains('fullscreen-active')) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('button, a, input, select, textarea')) return;
+      const nowMs = Date.now();
+      if (nowMs - lastTap < 320) {
+        e.preventDefault();
+        lastTap = 0;
+        toggleFullscreen();
+      } else {
+        lastTap = nowMs;
+      }
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('dblclick', onDblClick);
+    document.addEventListener('touchend', onTouchEnd, { passive: false });
     return () => {
-      window.removeEventListener('mousemove', revealTemporarily);
-      if (fsHoverTimerRef.current !== null) {
-        window.clearTimeout(fsHoverTimerRef.current);
-        fsHoverTimerRef.current = null;
-      }
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('dblclick', onDblClick);
+      document.removeEventListener('touchend', onTouchEnd);
     };
-  }, [isFullscreen]);
+  }, [toggleFullscreen, settingsOpen]);
 
-  const updateSettings = useCallback((patch: Partial<AppSettings>) => {
-    setSettings((prev) => ({ ...prev, ...patch }));
+  // Document title per route (when not overridden by active Study/Timer/Stopwatch/Countdown/Alarm)
+  useEffect(() => {
+    if (route === 'clock') {
+      document.title = worldMode ? t.headerWorldClock : t.headerClock;
+    } else if (route === 'alarm' && !ringingAlarm) {
+      document.title = t.headerAlarm;
+    }
+  }, [route, worldMode, ringingAlarm, t.headerWorldClock, t.headerClock, t.headerAlarm]);
+
+  const updateSettings = useCallback((partial: Partial<AppSettings>) => {
+    setSettings((prev) => ({ ...prev, ...partial }));
   }, []);
 
   const resetSettings = useCallback(() => {
@@ -517,174 +520,172 @@ export const App: React.FC = () => {
   const toggleLightDark = useCallback(() => {
     setSettings((prev) => ({
       ...prev,
-      theme: prev.theme === 'light' || prev.theme === 'sand' ? 'dark' : 'light',
+      theme: prev.theme === 'light' ? 'dark' : 'light',
     }));
   }, []);
 
-  const handleQuickTimer = useCallback(
-    (seconds: number) => {
-      setQuickTimerSec(seconds);
-      navigate('timer');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    },
-    [navigate]
-  );
+  const handleDismissGlobalAlarm = () => {
+    if (ringingAlarm) {
+      setAlarms((prev) =>
+        prev.map((al) =>
+          al.id === ringingAlarm.id
+            ? {
+                ...al,
+                snoozeUntil: undefined,
+                enabled: al.days.length === 0 ? false : al.enabled,
+              }
+            : al
+        )
+      );
+    }
+    stopAlarmLoop();
+    clearAlarmTimers();
+    setRingingAlarm(null);
+  };
 
-  const handleQuickCountdownDays = useCallback(
-    (days: number) => {
-      setQuickCountdownDays(days);
-      navigate('countdown');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    },
-    [navigate]
-  );
-
-  const handleOpenWorldClock = useCallback(() => {
-    navigate('clock');
-    setWorldModeState(true);
-  }, [navigate]);
+  const handleSnoozeGlobalAlarm = () => {
+    if (!ringingAlarm) return;
+    stopAlarmLoop();
+    clearAlarmTimers();
+    const until = Date.now() + settings.snoozeMinutes * 60000;
+    const untilDate = new Date(until);
+    setAlarms((prev) =>
+      prev.map((al) => (al.id === ringingAlarm.id ? { ...al, snoozeUntil: until } : al))
+    );
+    showToast(
+      t.snoozedUntilTemplate.replace(
+        '{time}',
+        formatAlarmDisplay(
+          untilDate.getHours(),
+          untilDate.getMinutes(),
+          settings.use24Hour
+        )
+      )
+    );
+    setRingingAlarm(null);
+  };
 
   return (
-    <div
-      className="app-container"
-      onDoubleClick={(e) => {
-        if (isFullscreen && !isInteractiveTarget(e.target)) {
-          exitFullscreen();
-        }
-      }}
-      onTouchEnd={(e) => {
-        if (!isFullscreen || isInteractiveTarget(e.target)) return;
-        const now = Date.now();
-        if (now - lastTouchTapRef.current < 320) {
-          lastTouchTapRef.current = 0;
-          exitFullscreen();
-        } else {
-          lastTouchTapRef.current = now;
-        }
-      }}
-    >
+    <>
       <HeaderNav
-        activeRoute={activeRoute}
-        onSelectRoute={navigate}
+        activeRoute={route}
+        worldMode={worldMode}
+        onSelectRoute={(next) => {
+          if (next === 'clock') handleSetWorldMode(false);
+          else navigate(next);
+        }}
         theme={settings.theme}
         onToggleLightDark={toggleLightDark}
         isFullscreen={isFullscreen}
         onToggleFullscreen={toggleFullscreen}
         onOpenSettings={() => setSettingsOpen(true)}
         language={settings.language}
-        onChangeLanguage={(language) => updateSettings({ language })}
-        worldMode={activeRoute === 'clock' && worldMode}
-        onToggleWorldMode={setWorldMode}
+        onChangeLanguage={(lang) => updateSettings({ language: lang })}
       />
 
-      {isFullscreen ? (
-        <button
-          type="button"
-          onClick={exitFullscreen}
-          aria-label="Exit Fullscreen"
-          title="Exit Fullscreen (Esc / F)"
-          className={`fullscreen-exit-fab ${fsExitVisible ? 'visible' : ''}`.trim()}
-        >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M8 3v3a2 2 0 0 1-2 2H3" />
-            <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
-            <path d="M3 16h3a2 2 0 0 1 2 2v3" />
-            <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
-          </svg>
-        </button>
-      ) : null}
-
-      <main>
-        {activeRoute === 'clock' && (
+      <main className="sd-app-main">
+        {route === 'clock' && (
           <ClockPage
             settings={settings}
-            onQuickTimer={handleQuickTimer}
-            onQuickCountdownDays={handleQuickCountdownDays}
-            onNavigate={navigate}
             worldMode={worldMode}
-            onChangeWorldMode={setWorldMode}
+            onChangeWorldMode={handleSetWorldMode}
+            onShowToast={(msg) => showToast(msg)}
+            onQuickTimer={(secs) => {
+              setQuickTimerSecs(secs);
+              navigate('timer');
+            }}
+            onQuickCountdownDays={(days) => {
+              setQuickCountdownDays(days);
+              navigate('countdown');
+            }}
+            onNavigate={navigate}
           />
         )}
-        {activeRoute === 'study' && (
-          <StudyPage settings={settings} onShowToast={showToast} />
+
+        {route === 'study' && (
+          <StudyPage settings={settings} onShowToast={(msg) => showToast(msg)} />
         )}
-        {activeRoute === 'timer' && (
+
+        {route === 'timer' && (
           <TimerPage
             settings={settings}
-            externalSecondsPreset={quickTimerSec}
-            onConsumeExternalPreset={() => setQuickTimerSec(null)}
+            presetSeconds={quickTimerSecs}
+            onConsumePreset={() => setQuickTimerSecs(null)}
+            onUpdateSettings={updateSettings}
           />
         )}
-        {activeRoute === 'stopwatch' && <StopwatchPage settings={settings} />}
-        {activeRoute === 'countdown' && (
+
+        {route === 'stopwatch' && <StopwatchPage settings={settings} />}
+
+        {route === 'countdown' && (
           <CountdownPage
             settings={settings}
-            externalDaysOffset={quickCountdownDays}
-            onConsumeExternalDays={() => setQuickCountdownDays(null)}
+            presetDaysFromToday={quickCountdownDays}
+            onConsumePresetDays={() => setQuickCountdownDays(null)}
+            onUpdateSettings={updateSettings}
+            onShowToast={(msg) => showToast(msg)}
           />
         )}
-        {activeRoute === 'alarm' && (
+
+        {route === 'alarm' && (
           <AlarmPage
             settings={settings}
-            onShowToast={showToast}
             alarms={alarms}
-            onChangeAlarms={setAlarms}
+            setAlarms={setAlarms}
+            ringingAlarm={ringingAlarm}
+            setRingingAlarm={setRingingAlarm}
+            onShowToast={showToast}
+            onUpdateSettings={updateSettings}
           />
         )}
       </main>
 
       <Footer
         onNavigate={navigate}
-        onOpenWorldClock={handleOpenWorldClock}
+        onOpenWorldClock={() => handleSetWorldMode(true)}
+        onNavigateToSection={(targetRoute, sectionId) =>
+          handleNavigateToSection(targetRoute, sectionId)
+        }
         language={settings.language}
       />
 
       <SettingsDrawer
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        activeRoute={activeRoute}
+        activeRoute={route}
         settings={settings}
         onUpdate={updateSettings}
         onReset={resetSettings}
       />
 
-      {ringingAlarm ? (
-        <div className="modal-overlay">
+      {/* Global Ringing Modal when user is NOT on Alarm tab */}
+      {ringingAlarm && route !== 'alarm' ? (
+        <div className="sd-modal-overlay visible">
           <div
             role="alertdialog"
             aria-modal="true"
             aria-label={t.dockAlarm}
-            className="ring-modal"
+            className="sd-ring-modal"
           >
-            <div className="modal-icon">
-              <BellRing className="w-[30px] h-[30px]" />
+            <div className="sd-modal-icon">
+              <Icon name="notifications_active" />
             </div>
-            <div className="modal-time" dir="ltr">
+            <div className="sd-modal-time" dir="ltr">
               {formatAlarmDisplay(ringingAlarm.hour24, ringingAlarm.minute, settings.use24Hour)}
             </div>
-            <div className="modal-label">{ringingAlarm.label || t.dockAlarm}</div>
-            <div className="modal-actions">
+            <div className="sd-modal-label">{ringingAlarm.label || t.dockAlarm}</div>
+            <div className="sd-modal-actions">
               <button
                 type="button"
-                onClick={handleDismissRingingAlarm}
-                className="btn btn-lg btn-primary btn-block"
+                onClick={handleDismissGlobalAlarm}
+                className="btn sd-btn-lg sd-btn-primary sd-btn-block"
               >
                 {t.ok}
               </button>
               <button
                 type="button"
-                onClick={handleSnoozeRingingAlarm}
-                className="btn btn-lg btn-secondary btn-block"
+                onClick={handleSnoozeGlobalAlarm}
+                className="btn sd-btn-lg sd-btn-secondary sd-btn-block"
               >
                 {t.snooze}
               </button>
@@ -693,17 +694,18 @@ export const App: React.FC = () => {
         </div>
       ) : null}
 
-      {toastMsg ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className={`toast ${toastIsFs ? 'fullscreen-notification' : ''}`.trim()}
-        >
-          {toastMsg}
-        </div>
-      ) : null}
-    </div>
+      {/* Floating Toast Notification */}
+      <div
+        className={`toast ${toast ? 'visible' : ''} ${
+          toast?.variant === 'error' ? 'error' : ''
+        }`.trim()}
+        role="status"
+        aria-live="polite"
+      >
+        {toast?.text || ''}
+      </div>
+    </>
   );
-};
+}
 
 export default App;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AppSettings,
   FlipStyle,
@@ -8,13 +8,15 @@ import {
   ThemeMode,
 } from '../types';
 import {
-  playSoundOnce,
-  stopAlarmLoop,
+  startPreviewSound,
+  stopPreviewOnly,
   subscribeSoundState,
   togglePreviewSound,
 } from '../utils/soundEngine';
 import { getStrings } from '../i18n';
 import { UIDropdown } from './UIDropdown';
+import { getRingtoneOptions } from './RingtoneSelector';
+import { Icon } from './Icon';
 
 interface SettingsDrawerProps {
   open: boolean;
@@ -50,7 +52,7 @@ const Stepper: React.FC<{
   <div className="stepper" dir="ltr">
     <button
       type="button"
-      className="time-button"
+      className="sd-time-button"
       onClick={() => onChange(Math.max(min, value - 1))}
       aria-label="Decrease"
     >
@@ -58,7 +60,7 @@ const Stepper: React.FC<{
     </button>
     <input
       type="number"
-      className="stepper-input"
+      className="sd-stepper-input"
       min={min}
       max={max}
       value={value}
@@ -69,7 +71,7 @@ const Stepper: React.FC<{
     />
     <button
       type="button"
-      className="time-button"
+      className="sd-time-button"
       onClick={() => onChange(Math.min(max, value + 1))}
       aria-label="Increase"
     >
@@ -98,7 +100,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
 
   useEffect(() => {
     if (!open) {
-      if (testingSound) stopAlarmLoop();
+      stopPreviewOnly();
       return;
     }
     const onKey = (e: KeyboardEvent) => {
@@ -106,7 +108,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose, testingSound]);
+  }, [open, onClose]);
 
   const applyPreset = (preset: 'classic' | 'short' | 'long') => {
     if (preset === 'classic') {
@@ -135,18 +137,19 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
 
   const handleTestSound = () => {
     const vol = activeRoute === 'alarm' ? Math.max(10, settings.volume) : settings.volume;
-    togglePreviewSound(settings.soundProfile, Math.max(10, vol));
+    togglePreviewSound(settings.soundProfile, Math.max(25, vol));
   };
 
   const handleSelectSound = (next: SoundProfile) => {
     onUpdate({ soundProfile: next });
     const vol = activeRoute === 'alarm' ? Math.max(10, settings.volume) : settings.volume;
-    playSoundOnce(next, Math.max(15, vol));
+    startPreviewSound(next, Math.max(25, vol));
   };
 
   const handleReset = () => {
     setResetDone(true);
     onReset();
+    window.dispatchEvent(new Event('settingsreset'));
     window.setTimeout(() => setResetDone(false), 650);
   };
 
@@ -155,28 +158,8 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   const volumeFillPct = `${settings.volume}%`;
   const alarmVolFillPct = `${((Math.max(10, settings.volume) - 10) / 90) * 100}%`;
 
-  const allSoundOptions: { value: SoundProfile; label: string }[] = [
-    { value: 'bell', label: t.soundBell },
-    { value: 'piano', label: t.soundPiano },
-    { value: 'melody', label: t.soundMelody },
-    { value: 'chime', label: t.soundChime },
-    { value: 'sunrise', label: t.soundSunrise },
-    { value: 'harmony', label: t.soundHarmony },
-    { value: 'crystal', label: t.soundCrystal },
-    { value: 'beacon', label: t.soundBeacon },
-    { value: 'digital', label: t.soundDigital },
-    { value: 'classic', label: t.soundClassic },
-  ];
-
-  const toneNoteIcon = (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 18V5l12-2v13" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="18" cy="16" r="3" />
-    </svg>
-  );
-
-  const studySoundOptions = allSoundOptions;
+  const allSoundOptions = useMemo(() => getRingtoneOptions(t), [t]);
+  const toneNoteIcon = <Icon name="music_note" style={{ fontSize: '18px' }} />;
 
   const themeChoices: { id: ThemeMode; label: string }[] = [
     { id: 'dark', label: t.themeDark },
@@ -200,74 +183,71 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   return (
     <>
       <div
-        className={`settings-scrim ${open ? 'open' : ''}`}
+        className={`sd-settings-scrim ${open ? 'open' : ''}`}
         onClick={onClose}
         aria-hidden={!open}
       />
 
       <aside
-        className={`settings-panel ${open ? 'open' : ''}`}
+        className={`sd-settings-panel ${open ? 'open' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label={t.settingsTitle}
       >
-        <div className="settings-header">
-          <h2 className="settings-title">
+        <div className="sd-settings-header">
+          <h2 className="sd-settings-title">
             {activeRoute === 'study' ? t.studySettingsTitle : t.settingsTitle}
           </h2>
           <button
             type="button"
-            className="icon-button"
+            className="sd-icon-button"
             onClick={onClose}
             aria-label="Close"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <Icon name="close" />
           </button>
         </div>
 
-        <div className="settings-content">
+        <div className="sd-settings-content">
           {/* Theme Selection */}
-          <div className="settings-group">
-            <h3 className="settings-group-title">{t.themeSelection}</h3>
-            <div className="theme-picker" role="radiogroup" aria-label={t.themeSelection}>
+          <div className="sd-settings-group">
+            <h3 className="sd-settings-group-title">{t.themeSelection}</h3>
+            <div className="sd-theme-picker" role="radiogroup" aria-label={t.themeSelection}>
               {themeChoices.map((th) => (
                 <button
                   key={th.id}
                   type="button"
                   role="radio"
                   aria-checked={settings.theme === th.id}
-                  className="theme-option"
+                  className="sd-theme-option"
                   onClick={() => onUpdate({ theme: th.id })}
                 >
-                  <span className={`theme-swatch theme-swatch-${th.id}`} dir="ltr">
+                  <span className={`sd-theme-swatch theme-swatch-${th.id}`} dir="ltr">
                     <span>12</span>
                   </span>
-                  <span className="theme-name">{th.label}</span>
+                  <span className="sd-theme-name">{th.label}</span>
                 </button>
               ))}
             </div>
           </div>
 
           {/* Flip Style */}
-          <div className="settings-group">
-            <h3 className="settings-group-title">{t.flipStyle}</h3>
-            <div className="look-picker" role="radiogroup" aria-label={t.flipStyle}>
+          <div className="sd-settings-group">
+            <h3 className="sd-settings-group-title">{t.flipStyle}</h3>
+            <div className="sd-look-picker" role="radiogroup" aria-label={t.flipStyle}>
               {styleChoices.map((st) => (
                 <button
                   key={st.id}
                   type="button"
                   role="radio"
                   aria-checked={settings.flipStyle === st.id}
-                  className="look-option"
+                  className="sd-look-option"
                   onClick={() => onUpdate({ flipStyle: st.id })}
                 >
-                  <span className={`look-swatch look-swatch-${st.id}`} dir="ltr">
+                  <span className={`sd-look-swatch look-swatch-${st.id}`} dir="ltr">
                     <span>12</span>
                   </span>
-                  <span className="look-name">{st.label}</span>
+                  <span className="sd-look-name">{st.label}</span>
                 </button>
               ))}
             </div>
@@ -275,10 +255,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
 
           {/* CLOCK DISPLAY (Clock & Alarm) */}
           {(activeRoute === 'clock' || activeRoute === 'alarm') && (
-            <div className="settings-group">
-              <h3 className="settings-group-title">{t.clockDisplay}</h3>
-              <div className="settings-list">
-                <label className="settings-row">
+            <div className="sd-settings-group">
+              <h3 className="sd-settings-group-title">{t.clockDisplay}</h3>
+              <div className="sd-settings-list">
+                <label className="sd-settings-row">
                   <span>{t.use24Hour}</span>
                   <Switch
                     checked={settings.use24Hour}
@@ -287,14 +267,14 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 </label>
                 {activeRoute === 'clock' && (
                   <>
-                    <label className="settings-row">
+                    <label className="sd-settings-row">
                       <span>{t.showSeconds}</span>
                       <Switch
                         checked={settings.showSeconds}
                         onChange={(v) => onUpdate({ showSeconds: v })}
                       />
                     </label>
-                    <label className="settings-row">
+                    <label className="sd-settings-row">
                       <span>{t.showDateDay}</span>
                       <Switch
                         checked={settings.showDateAndDay}
@@ -310,9 +290,9 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
           {/* STUDY TIMER SETTINGS */}
           {activeRoute === 'study' && (
             <>
-              <div className="settings-group">
-                <h3 className="settings-group-title">{t.presets}</h3>
-                <div className="chip-row">
+              <div className="sd-settings-group">
+                <h3 className="sd-settings-group-title">{t.presets}</h3>
+                <div className="sd-chip-row">
                   {(
                     [
                       { id: 'classic', label: t.presetClassic },
@@ -332,10 +312,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 </div>
               </div>
 
-              <div className="settings-group">
-                <h3 className="settings-group-title">{t.timeSettingsMin}</h3>
-                <div className="settings-list">
-                  <div className="settings-row">
+              <div className="sd-settings-group">
+                <h3 className="sd-settings-group-title">{t.timeSettingsMin}</h3>
+                <div className="sd-settings-list">
+                  <div className="sd-settings-row">
                     <span>{t.workSession}</span>
                     <Stepper
                       value={settings.studyWorkMin}
@@ -344,7 +324,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                       onChange={(v) => onUpdate({ studyPreset: 'custom', studyWorkMin: v })}
                     />
                   </div>
-                  <div className="settings-row">
+                  <div className="sd-settings-row">
                     <span>{t.shortBreak}</span>
                     <Stepper
                       value={settings.studyShortBreakMin}
@@ -353,7 +333,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                       onChange={(v) => onUpdate({ studyPreset: 'custom', studyShortBreakMin: v })}
                     />
                   </div>
-                  <div className="settings-row">
+                  <div className="sd-settings-row">
                     <span>{t.longBreak}</span>
                     <Stepper
                       value={settings.studyLongBreakMin}
@@ -362,7 +342,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                       onChange={(v) => onUpdate({ studyPreset: 'custom', studyLongBreakMin: v })}
                     />
                   </div>
-                  <div className="settings-row">
+                  <div className="sd-settings-row">
                     <span>{t.sessionsUntilLong}</span>
                     <Stepper
                       value={settings.studySessionsBeforeLong}
@@ -371,7 +351,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                       onChange={(v) => onUpdate({ studySessionsBeforeLong: v })}
                     />
                   </div>
-                  <div className="settings-row">
+                  <div className="sd-settings-row">
                     <span>{t.dailyGoalSessions}</span>
                     <Stepper
                       value={settings.studyDailyGoal}
@@ -383,10 +363,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 </div>
               </div>
 
-              <div className="settings-group">
-                <h3 className="settings-group-title">{t.soundAndNotifs}</h3>
-                <div className="settings-list">
-                  <label className="settings-row">
+              <div className="sd-settings-group">
+                <h3 className="sd-settings-group-title">{t.soundAndNotifs}</h3>
+                <div className="sd-settings-list">
+                  <label className="sd-settings-row">
                     <span>{t.soundNotification}</span>
                     <Switch
                       checked={settings.soundEnabled}
@@ -394,24 +374,24 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                     />
                   </label>
                   <div
-                    className={`settings-subrows ${!settings.soundEnabled ? 'dimmed' : ''}`}
+                    className={`sd-settings-subrows ${!settings.soundEnabled ? 'dimmed' : ''}`}
                     aria-disabled={!settings.soundEnabled}
                   >
-                    <div className="settings-row">
+                    <div className="sd-settings-row">
                       <span>{t.selectSound}</span>
                       <UIDropdown<SoundProfile>
                         value={settings.soundProfile}
-                        options={studySoundOptions}
+                        options={allSoundOptions}
                         disabled={!settings.soundEnabled}
                         ariaLabel={t.selectSound}
                         leadingIcon={toneNoteIcon}
                         onChange={handleSelectSound}
                       />
                     </div>
-                    <div className="settings-row stacked">
-                      <div className="settings-row-head">
+                    <div className="sd-settings-row stacked">
+                      <div className="sd-settings-row-head">
                         <span>{t.volume}</span>
-                        <span className="settings-value" dir="ltr">{settings.volume}%</span>
+                        <span className="sd-settings-value" dir="ltr">{settings.volume}%</span>
                       </div>
                       <input
                         type="range"
@@ -428,30 +408,21 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                       type="button"
                       disabled={!settings.soundEnabled}
                       aria-pressed={testingSound}
-                      className="settings-row row-button"
+                      className="sd-settings-row sd-row-button"
                       onClick={handleTestSound}
                     >
-                      {testingSound ? (
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                          <rect x="6" y="6" width="12" height="12" rx="2.5" />
-                        </svg>
-                      ) : (
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                        </svg>
-                      )}
-                      <span>{t.testSound}</span>
+                      <Icon name={testingSound ? 'stop' : 'volume_up'} />
+                      <span>{testingSound ? t.stopPreview : t.testSound}</span>
                     </button>
                   </div>
-                  <label className="settings-row">
+                  <label className="sd-settings-row">
                     <span>{t.tickingSound}</span>
                     <Switch
                       checked={settings.studyTickingSound}
                       onChange={(v) => onUpdate({ studyTickingSound: v })}
                     />
                   </label>
-                  <label className="settings-row">
+                  <label className="sd-settings-row">
                     <span>{t.desktopNotifs}</span>
                     <Switch
                       checked={settings.studyDesktopNotifications}
@@ -466,24 +437,24 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 </div>
               </div>
 
-              <div className="settings-group">
-                <h3 className="settings-group-title">{t.behavior}</h3>
-                <div className="settings-list">
-                  <label className="settings-row">
+              <div className="sd-settings-group">
+                <h3 className="sd-settings-group-title">{t.behavior}</h3>
+                <div className="sd-settings-list">
+                  <label className="sd-settings-row">
                     <span>{t.autoStartBreaks}</span>
                     <Switch
                       checked={settings.studyAutoStartBreaks}
                       onChange={(v) => onUpdate({ studyAutoStartBreaks: v })}
                     />
                   </label>
-                  <label className="settings-row">
+                  <label className="sd-settings-row">
                     <span>{t.autoStartWork}</span>
                     <Switch
                       checked={settings.studyAutoStartWork}
                       onChange={(v) => onUpdate({ studyAutoStartWork: v })}
                     />
                   </label>
-                  <label className="settings-row">
+                  <label className="sd-settings-row">
                     <span>{t.autoCheckTask}</span>
                     <Switch
                       checked={settings.studyAutoCheckTask}
@@ -495,12 +466,12 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
             </>
           )}
 
-          {/* TIMER ALARM SOUND */}
-          {activeRoute === 'timer' && (
-            <div className="settings-group">
-              <h3 className="settings-group-title">{t.alarmSound}</h3>
-              <div className="settings-list">
-                <label className="settings-row">
+          {/* TIMER & COUNTDOWN ALARM SOUND */}
+          {(activeRoute === 'timer' || activeRoute === 'countdown') && (
+            <div className="sd-settings-group">
+              <h3 className="sd-settings-group-title">{t.alarmSound}</h3>
+              <div className="sd-settings-list">
+                <label className="sd-settings-row">
                   <span>{t.soundNotification}</span>
                   <Switch
                     checked={settings.soundEnabled}
@@ -508,10 +479,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                   />
                 </label>
                 <div
-                  className={`settings-subrows ${!settings.soundEnabled ? 'dimmed' : ''}`}
+                  className={`sd-settings-subrows ${!settings.soundEnabled ? 'dimmed' : ''}`}
                   aria-disabled={!settings.soundEnabled}
                 >
-                  <div className="settings-row">
+                  <div className="sd-settings-row">
                     <span>{t.selectSound}</span>
                     <UIDropdown<SoundProfile>
                       value={settings.soundProfile}
@@ -522,10 +493,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                       onChange={handleSelectSound}
                     />
                   </div>
-                  <div className="settings-row stacked">
-                    <div className="settings-row-head">
+                  <div className="sd-settings-row stacked">
+                    <div className="sd-settings-row-head">
                       <span>{t.volume}</span>
-                      <span className="settings-value" dir="ltr">{settings.volume}%</span>
+                      <span className="sd-settings-value" dir="ltr">{settings.volume}%</span>
                     </div>
                     <input
                       type="range"
@@ -538,7 +509,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                       className="range"
                     />
                   </div>
-                  <label className="settings-row">
+                  <label className="sd-settings-row">
                     <span>{t.ringUntilStopped}</span>
                     <Switch
                       checked={settings.ringUntilStopped}
@@ -549,20 +520,11 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                     type="button"
                     disabled={!settings.soundEnabled}
                     aria-pressed={testingSound}
-                    className="settings-row row-button"
+                    className="sd-settings-row sd-row-button"
                     onClick={handleTestSound}
                   >
-                    {testingSound ? (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                        <rect x="6" y="6" width="12" height="12" rx="2.5" />
-                      </svg>
-                    ) : (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                      </svg>
-                    )}
-                    <span>{t.testSound}</span>
+                    <Icon name={testingSound ? 'stop' : 'volume_up'} />
+                    <span>{testingSound ? t.stopPreview : t.testSound}</span>
                   </button>
                 </div>
               </div>
@@ -571,10 +533,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
 
           {/* ALARM SOUND */}
           {activeRoute === 'alarm' && (
-            <div className="settings-group">
-              <h3 className="settings-group-title">{t.alarmSound}</h3>
-              <div className="settings-list">
-                <div className="settings-row">
+            <div className="sd-settings-group">
+              <h3 className="sd-settings-group-title">{t.alarmSound}</h3>
+              <div className="sd-settings-list">
+                <div className="sd-settings-row">
                   <span>{t.selectSound}</span>
                   <UIDropdown<SoundProfile>
                     value={settings.soundProfile}
@@ -584,10 +546,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                     onChange={handleSelectSound}
                   />
                 </div>
-                <div className="settings-row stacked">
-                  <div className="settings-row-head">
+                <div className="sd-settings-row stacked">
+                  <div className="sd-settings-row-head">
                     <span>{t.volume}</span>
-                    <span className="settings-value" dir="ltr">{Math.max(10, settings.volume)}%</span>
+                    <span className="sd-settings-value" dir="ltr">{Math.max(10, settings.volume)}%</span>
                   </div>
                   <input
                     type="range"
@@ -599,14 +561,14 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                     className="range"
                   />
                 </div>
-                <label className="settings-row">
+                <label className="sd-settings-row">
                   <span>{t.gradualVolume}</span>
                   <Switch
                     checked={settings.gradualVolume}
                     onChange={(v) => onUpdate({ gradualVolume: v })}
                   />
                 </label>
-                <div className="settings-row">
+                <div className="sd-settings-row">
                   <span>{t.snoozeLengthMin}</span>
                   <Stepper
                     value={settings.snoozeMinutes}
@@ -618,36 +580,27 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 <button
                   type="button"
                   aria-pressed={testingSound}
-                  className="settings-row row-button"
+                  className="sd-settings-row sd-row-button"
                   onClick={handleTestSound}
                 >
-                  {testingSound ? (
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                      <rect x="6" y="6" width="12" height="12" rx="2.5" />
-                    </svg>
-                  ) : (
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                    </svg>
-                  )}
-                  <span>{t.testSound}</span>
+                  <Icon name={testingSound ? 'stop' : 'volume_up'} />
+                  <span>{testingSound ? t.stopPreview : t.testSound}</span>
                 </button>
               </div>
             </div>
           )}
 
           {/* CLOCK STYLE / APPEARANCE */}
-          <div className="settings-group">
-            <h3 className="settings-group-title">
+          <div className="sd-settings-group">
+            <h3 className="sd-settings-group-title">
               {activeRoute === 'clock' ? t.clockStyle : t.appearance}
             </h3>
-            <div className="settings-list">
-              <div className="settings-row stacked">
-                <div className="settings-row-head">
+            <div className="sd-settings-list">
+              <div className="sd-settings-row stacked">
+                <div className="sd-settings-row-head">
                   <span>{t.layout}</span>
                 </div>
-                <div className="segmented layout-options">
+                <div className="segmented sd-layout-options">
                   {layoutChoices.map((ly) => (
                     <button
                       key={ly.id}
@@ -661,10 +614,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 </div>
               </div>
 
-              <div className="settings-row stacked">
-                <div className="settings-row-head">
+              <div className="sd-settings-row stacked">
+                <div className="sd-settings-row-head">
                   <span>{t.size}</span>
-                  <span className="settings-value" dir="ltr">{settings.sizePercent}%</span>
+                  <span className="sd-settings-value" dir="ltr">{settings.sizePercent}%</span>
                 </div>
                 <input
                   type="range"
@@ -679,10 +632,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
               </div>
 
               {activeRoute === 'clock' && (
-                <div className="settings-row stacked">
-                  <div className="settings-row-head">
+                <div className="sd-settings-row stacked">
+                  <div className="sd-settings-row-head">
                     <span>{t.cornerRadius}</span>
-                    <span className="settings-value" dir="ltr">{settings.cornerRadius}px</span>
+                    <span className="sd-settings-value" dir="ltr">{settings.cornerRadius}px</span>
                   </div>
                   <input
                     type="range"
@@ -700,10 +653,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
           </div>
 
           {/* Reset to Defaults */}
-          <div className="settings-group">
+          <div className="sd-settings-group">
             <button
               type="button"
-              className={`settings-reset ${resetDone ? 'done' : ''}`}
+              className={`sd-settings-reset ${resetDone ? 'done' : ''}`}
               onClick={handleReset}
             >
               {t.resetDefaults}
