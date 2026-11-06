@@ -2,7 +2,7 @@
   "name": "splitdeck-flip-clock-suite",
   "private": true,
   "version": "1.0.0",
-  "description": "Responsive split-flap clock, study focus timer, countdown, stopwatch, and alarm web suite built with Vite, React, TypeScript, and Tailwind CSS.",
+  "description": "SplitDeck is a responsive browser time suite with a world clock, study timer, stopwatch, countdown, and alarms.",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -13,10 +13,8 @@
   "dependencies": {
     "@ncdai/react-wheel-picker": "^1.2.3",
     "howler": "^2.2.4",
-    "lucide-react": "^0.468.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "snd-lib": "^1.2.4"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/howler": "^2.2.13",

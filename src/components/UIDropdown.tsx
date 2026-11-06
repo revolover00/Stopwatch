@@ -1,10 +1,18 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
+import { Icon } from './Icon';
 
 export interface UIDropdownOption<T extends string | number> {
   value: T;
   label: string;
   sublabel?: string;
+  group?: string;
   dir?: 'ltr' | 'rtl';
 }
 
@@ -29,6 +37,34 @@ interface PopoverCoords {
   minWidth: number;
   maxHeight: number;
   placement: 'bottom' | 'top';
+}
+
+function scrollWithinMenu(
+  menu: HTMLElement,
+  item: HTMLElement,
+  mode: 'center' | 'nearest'
+): void {
+  const menuRect = menu.getBoundingClientRect();
+  const itemRect = item.getBoundingClientRect();
+  const offsetWithinMenu = itemRect.top - menuRect.top + menu.scrollTop;
+
+  if (mode === 'center') {
+    const target = offsetWithinMenu - menu.clientHeight / 2 + itemRect.height / 2;
+    menu.scrollTop = Math.max(0, target);
+    return;
+  }
+
+  const pad = 6;
+  const viewTop = menu.scrollTop + pad;
+  const viewBottom = menu.scrollTop + menu.clientHeight - pad;
+  const itemTop = offsetWithinMenu;
+  const itemBottom = offsetWithinMenu + itemRect.height;
+
+  if (itemTop < viewTop) {
+    menu.scrollTop = Math.max(0, itemTop - pad);
+  } else if (itemBottom > viewBottom) {
+    menu.scrollTop = itemBottom - menu.clientHeight + pad;
+  }
 }
 
 export function UIDropdown<T extends string | number>({
@@ -57,57 +93,77 @@ export function UIDropdown<T extends string | number>({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
 
+  const wasOpenRef = useRef(false);
+  const lockedPlacementRef = useRef<'top' | 'bottom' | null>(null);
+  const keyboardNavRef = useRef(false);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
   const selectedOption = options.find((o) => o.value === value) ?? options[0];
 
-  const updatePosition = useCallback(() => {
-    const el = triggerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const isRtl = document.documentElement.dir === 'rtl';
+  const updatePosition = useCallback(
+    (isInitialOpen = false) => {
+      const el = triggerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
 
-    const desiredWidth =
-      variant === 'time'
-        ? Math.max(144, rect.width + 24)
-        : Math.max(220, rect.width);
+      // If outer page scrolled the trigger completely off-screen, close cleanly
+      if (!isInitialOpen && (rect.bottom < 48 || rect.top > vh - 24)) {
+        setOpen(false);
+        return;
+      }
 
-    const spaceBelow = vh - rect.bottom - 14;
-    const spaceAbove = rect.top - 14;
-    const openUpward = spaceBelow < 240 && spaceAbove > spaceBelow;
-    const maxHeight = Math.max(
-      150,
-      Math.min(variant === 'time' ? 268 : 320, openUpward ? spaceAbove : spaceBelow)
-    );
+      const isRtl = document.documentElement.dir === 'rtl';
+      const desiredWidth =
+        variant === 'time'
+          ? Math.max(144, rect.width + 24)
+          : Math.max(258, rect.width);
 
-    let left: number;
-    if (variant === 'time') {
-      left = rect.left + rect.width / 2 - desiredWidth / 2;
-    } else if (isRtl) {
-      left = rect.left;
-    } else {
-      left = rect.right - desiredWidth;
-    }
-    left = Math.max(12, Math.min(vw - desiredWidth - 12, left));
+      const spaceBelow = vh - rect.bottom - 14;
+      const spaceAbove = rect.top - 14;
 
-    if (openUpward) {
+      let placement = lockedPlacementRef.current;
+      if (isInitialOpen || !placement) {
+        placement = spaceBelow < 240 && spaceAbove > spaceBelow ? 'top' : 'bottom';
+        lockedPlacementRef.current = placement;
+      } else if (placement === 'bottom' && spaceBelow < 120 && spaceAbove > 180) {
+        placement = 'top';
+        lockedPlacementRef.current = 'top';
+      } else if (placement === 'top' && spaceAbove < 120 && spaceBelow > 180) {
+        placement = 'bottom';
+        lockedPlacementRef.current = 'bottom';
+      }
+
+      const openUpward = placement === 'top';
+      const maxCap = variant === 'time' ? 268 : 360;
+      const available = openUpward ? spaceAbove : spaceBelow;
+      const maxHeight = Math.max(140, Math.min(maxCap, available));
+
+      let left: number;
+      if (variant === 'time') {
+        left = rect.left + rect.width / 2 - desiredWidth / 2;
+      } else if (isRtl) {
+        left = rect.left;
+      } else {
+        left = rect.right - desiredWidth;
+      }
+      left = Math.max(12, Math.min(vw - desiredWidth - 12, left));
+
       setCoords({
-        bottom: vh - rect.top + 6,
+        top: openUpward ? undefined : rect.bottom + 6,
+        bottom: openUpward ? vh - rect.top + 6 : undefined,
         left,
         minWidth: desiredWidth,
         maxHeight,
-        placement: 'top',
+        placement,
       });
-    } else {
-      setCoords({
-        top: rect.bottom + 6,
-        left,
-        minWidth: desiredWidth,
-        maxHeight,
-        placement: 'bottom',
-      });
-    }
-  }, [variant]);
+    },
+    [variant]
+  );
 
   useEffect(() => {
     if (disabled && open) {
@@ -115,17 +171,38 @@ export function UIDropdown<T extends string | number>({
     }
   }, [disabled, open]);
 
+  // Run initial positioning & scroll-to-selected ONLY ONCE when opening (never on parent re-renders!)
   useLayoutEffect(() => {
-    if (!open) return;
-    updatePosition();
-    const idx = options.findIndex((o) => o.value === value);
-    setFocusedIdx(idx >= 0 ? idx : 0);
+    if (!open) {
+      wasOpenRef.current = false;
+      lockedPlacementRef.current = null;
+      return;
+    }
 
-    const raf = window.requestAnimationFrame(() => {
-      activeItemRef.current?.scrollIntoView({ block: 'center' });
-    });
-    return () => window.cancelAnimationFrame(raf);
-  }, [open, options, value, updatePosition]);
+    if (!wasOpenRef.current) {
+      wasOpenRef.current = true;
+      updatePosition(true);
+      const idx = optionsRef.current.findIndex((o) => o.value === value);
+      setFocusedIdx(idx >= 0 ? idx : 0);
+
+      const raf = window.requestAnimationFrame(() => {
+        if (menuRef.current && activeItemRef.current) {
+          scrollWithinMenu(menuRef.current, activeItemRef.current, 'center');
+        }
+      });
+      return () => window.cancelAnimationFrame(raf);
+    }
+  }, [open, value, updatePosition]);
+
+  // Keep keyboard-focused option in view ONLY when navigated via keyboard
+  useEffect(() => {
+    if (!open || !keyboardNavRef.current || !menuRef.current) return;
+    keyboardNavRef.current = false;
+    const item = menuRef.current.querySelectorAll<HTMLElement>('[role="option"]')[focusedIdx];
+    if (item) {
+      scrollWithinMenu(menuRef.current, item, 'nearest');
+    }
+  }, [focusedIdx, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -142,13 +219,23 @@ export function UIDropdown<T extends string | number>({
     };
 
     const onScrollOrResize = (e: Event) => {
-      if (e.type === 'scroll' && menuRef.current && menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node | null;
+      // Ignore scrolling inside the dropdown menu itself!
+      if (
+        e.type === 'scroll' &&
+        menuRef.current &&
+        target &&
+        (target === menuRef.current || menuRef.current.contains(target))
+      ) {
         return;
       }
-      updatePosition();
+      updatePosition(false);
     };
 
     const onKeyDownCapture = (e: KeyboardEvent) => {
+      const opts = optionsRef.current;
+      if (!opts.length) return;
+
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -158,24 +245,31 @@ export function UIDropdown<T extends string | number>({
       }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setFocusedIdx((i) => (i + 1) % options.length);
+        keyboardNavRef.current = true;
+        setFocusedIdx((i) => (i + 1) % opts.length);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setFocusedIdx((i) => (i - 1 + options.length) % options.length);
+        keyboardNavRef.current = true;
+        setFocusedIdx((i) => (i - 1 + opts.length) % opts.length);
       } else if (e.key === 'Home') {
         e.preventDefault();
+        keyboardNavRef.current = true;
         setFocusedIdx(0);
       } else if (e.key === 'End') {
         e.preventDefault();
-        setFocusedIdx(options.length - 1);
+        keyboardNavRef.current = true;
+        setFocusedIdx(opts.length - 1);
       } else if (e.key === 'Enter' || e.key === ' ') {
-        const chosen = options[focusedIdx];
-        if (chosen) {
-          e.preventDefault();
-          onChange(chosen.value);
-          setOpen(false);
-          triggerRef.current?.focus();
-        }
+        e.preventDefault();
+        setFocusedIdx((curr) => {
+          const chosen = opts[curr];
+          if (chosen) {
+            onChangeRef.current(chosen.value);
+            setOpen(false);
+            triggerRef.current?.focus();
+          }
+          return curr;
+        });
       }
     };
 
@@ -192,13 +286,7 @@ export function UIDropdown<T extends string | number>({
       window.removeEventListener('scroll', onScrollOrResize, true);
       window.removeEventListener('keydown', onKeyDownCapture, true);
     };
-  }, [open, options, focusedIdx, onChange, updatePosition]);
-
-  useEffect(() => {
-    if (!open || !menuRef.current) return;
-    const item = menuRef.current.querySelectorAll<HTMLElement>('[role="option"]')[focusedIdx];
-    item?.scrollIntoView({ block: 'nearest' });
-  }, [focusedIdx, open]);
+  }, [open, updatePosition]);
 
   return (
     <>
@@ -223,30 +311,17 @@ export function UIDropdown<T extends string | number>({
         className={
           variant === 'time'
             ? `ui-time-trigger ${open ? 'open' : ''} ${className}`.trim()
-            : `ui-select-trigger ${open ? 'open' : ''} ${className}`.trim()
+            : `sd-ui-select-trigger ${open ? 'open' : ''} ${className}`.trim()
         }
       >
         {variant === 'pill' && leadingIcon ? (
-          <span className="ui-select-leading" aria-hidden="true">
+          <span className="sd-ui-select-leading" aria-hidden="true">
             {leadingIcon}
           </span>
         ) : null}
-        <span className="ui-select-label">{selectedOption?.label ?? ''}</span>
+        <span className="sd-ui-select-label">{selectedOption?.label ?? ''}</span>
         {variant === 'pill' ? (
-          <svg
-            className="ui-select-chevron"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
+          <Icon name="keyboard_arrow_down" className="sd-ui-select-chevron" style={{ fontSize: '18px' }} />
         ) : null}
       </button>
 
@@ -256,7 +331,7 @@ export function UIDropdown<T extends string | number>({
               ref={menuRef}
               role="listbox"
               aria-label={ariaLabel}
-              className={`ui-dropdown-popover ${
+              className={`sd-ui-dropdown-popover ${
                 variant === 'time' ? 'ui-dropdown-time' : ''
               } placement-${coords.placement}`.trim()}
               style={{
@@ -270,42 +345,42 @@ export function UIDropdown<T extends string | number>({
               {options.map((opt, idx) => {
                 const isSelected = opt.value === value;
                 const isFocused = idx === focusedIdx;
+                const showGroupHeader =
+                  Boolean(opt.group) && (idx === 0 || options[idx - 1]?.group !== opt.group);
                 return (
-                  <button
-                    key={String(opt.value)}
-                    ref={isSelected ? activeItemRef : undefined}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    dir={opt.dir}
-                    onMouseEnter={() => setFocusedIdx(idx)}
-                    onClick={() => {
-                      onChange(opt.value);
-                      setOpen(false);
-                      triggerRef.current?.focus();
-                    }}
-                    className={`ui-dropdown-option ${isSelected ? 'selected' : ''} ${
-                      isFocused ? 'focused' : ''
-                    }`.trim()}
-                  >
-                    <span className="ui-dropdown-option-text">{opt.label}</span>
-                    {isSelected ? (
-                      <svg
-                        className="ui-dropdown-check"
-                        width="15"
-                        height="15"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
+                  <React.Fragment key={String(opt.value)}>
+                    {showGroupHeader ? (
+                      <div
+                        className={`sd-ui-dropdown-group-label ${idx > 0 ? 'has-divider' : ''}`.trim()}
+                        role="presentation"
                       >
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
+                        {opt.group}
+                      </div>
                     ) : null}
-                  </button>
+                    <button
+                      ref={isSelected ? activeItemRef : undefined}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      dir={opt.dir}
+                      onMouseMove={() => {
+                        if (focusedIdx !== idx) setFocusedIdx(idx);
+                      }}
+                      onClick={() => {
+                        onChange(opt.value);
+                        setOpen(false);
+                        triggerRef.current?.focus();
+                      }}
+                      className={`sd-ui-dropdown-option ${isSelected ? 'selected' : ''} ${
+                        isFocused ? 'focused' : ''
+                      }`.trim()}
+                    >
+                      <span className="sd-ui-dropdown-option-text">{opt.label}</span>
+                      {isSelected ? (
+                        <Icon name="check" className="sd-ui-dropdown-check" style={{ fontSize: '18px' }} />
+                      ) : null}
+                    </button>
+                  </React.Fragment>
                 );
               })}
             </div>,
