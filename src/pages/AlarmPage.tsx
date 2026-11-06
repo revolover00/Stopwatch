@@ -1,21 +1,22 @@
-import React, { useEffect, useState } from 'react';
-import { BellRing, Clock, Plus, Repeat, Trash2 } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { FlipCard, SecondsFlip } from '../components/FlipCard';
 import { AlarmWheelPicker } from '../components/IOSTimerWheelPicker';
+import { InlineRingtoneBar } from '../components/RingtoneSelector';
+import { Icon } from '../components/Icon';
 import type { AlarmItem, AppSettings } from '../types';
-import { startAlarmLoop, stopAlarmLoop } from '../utils/soundEngine';
+import { stopAlarmLoop } from '../utils/soundEngine';
 import { readStorage, writeStorage } from '../utils/storage';
 import { getLanguageMeta, getStrings, type UIStrings } from '../i18n';
 
 interface AlarmPageProps {
   settings: AppSettings;
-  onShowToast?: (msg: string) => void;
-  alarms?: AlarmItem[];
-  onChangeAlarms?: React.Dispatch<React.SetStateAction<AlarmItem[]>>;
+  alarms: AlarmItem[];
+  setAlarms: React.Dispatch<React.SetStateAction<AlarmItem[]>>;
+  ringingAlarm: AlarmItem | null;
+  setRingingAlarm: React.Dispatch<React.SetStateAction<AlarmItem | null>>;
+  onShowToast?: (msg: string, variant?: 'default' | 'error') => void;
+  onUpdateSettings?: (partial: Partial<AppSettings>) => void;
 }
-
-export const ALARMS_STORAGE_KEY = 'splitflap_alarms_v2';
-const ALARM_DRAFT_KEY = 'splitflap_alarm_draft_v2';
 
 interface AlarmDraft {
   pickHour: number;
@@ -24,73 +25,151 @@ interface AlarmDraft {
   pickDays: number[];
 }
 
-const PICKER_DAYS: { dayIndex: number; short: string; name: string }[] = [
-  { dayIndex: 0, short: 'S', name: 'Sunday' },
-  { dayIndex: 1, short: 'M', name: 'Monday' },
-  { dayIndex: 2, short: 'T', name: 'Tuesday' },
-  { dayIndex: 3, short: 'W', name: 'Wednesday' },
-  { dayIndex: 4, short: 'T', name: 'Thursday' },
-  { dayIndex: 5, short: 'F', name: 'Friday' },
-  { dayIndex: 6, short: 'S', name: 'Saturday' },
-];
+const ALARM_DRAFT_KEY = 'splitdeck:v1:alarm-draft';
 
-const ALARM_DIRECTORY: { group: string; times: { label: string; h: number; m: number }[] }[] = [
-  {
-    group: 'Morning',
-    times: [
-      { label: '5:00 AM', h: 5, m: 0 },
-      { label: '5:30 AM', h: 5, m: 30 },
-      { label: '6:00 AM', h: 6, m: 0 },
-      { label: '6:30 AM', h: 6, m: 30 },
-      { label: '7:00 AM', h: 7, m: 0 },
-      { label: '7:30 AM', h: 7, m: 30 },
-      { label: '8:00 AM', h: 8, m: 0 },
-      { label: '8:30 AM', h: 8, m: 30 },
-      { label: '9:00 AM', h: 9, m: 0 },
-      { label: '10:00 AM', h: 10, m: 0 },
-    ],
-  },
-  {
-    group: 'Afternoon',
-    times: [
-      { label: '12:00 PM', h: 12, m: 0 },
-      { label: '1:00 PM', h: 13, m: 0 },
-      { label: '2:00 PM', h: 14, m: 0 },
-      { label: '3:00 PM', h: 15, m: 0 },
-      { label: '4:00 PM', h: 16, m: 0 },
-      { label: '5:00 PM', h: 17, m: 0 },
-    ],
-  },
-  {
-    group: 'Evening',
-    times: [
-      { label: '6:00 PM', h: 18, m: 0 },
-      { label: '7:00 PM', h: 19, m: 0 },
-      { label: '8:00 PM', h: 20, m: 0 },
-      { label: '9:00 PM', h: 21, m: 0 },
-      { label: '10:00 PM', h: 22, m: 0 },
-      { label: '11:00 PM', h: 23, m: 0 },
-    ],
-  },
-];
-
-function summarizeDays(days: number[], t: UIStrings, bcp47: string): string {
-  if (days.length === 0) return t.repeatOnce;
-  if (days.length === 7) return t.repeatEveryDay;
-  const sorted = [...days].sort((a, b) => a - b).join(',');
-  if (sorted === '1,2,3,4,5') return t.repeatWeekdays;
-  if (sorted === '0,6') return t.repeatWeekends;
-  return PICKER_DAYS.filter((d) => days.includes(d.dayIndex))
-    .map((d) => {
-      const ref = new Date(2026, 10, 1 + d.dayIndex); // Nov 1 2026 is Sunday
-      return new Intl.DateTimeFormat(bcp47, { weekday: 'short' }).format(ref);
-    })
-    .join('، ');
+function isIntegerInRange(value: unknown, min: number, max: number): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
 }
 
-export function formatAlarmDisplay(hour24: number, minute: number, use24Hour: boolean): string {
+function readInitialAlarmDraft(): AlarmDraft {
+  const saved = readStorage<Partial<AlarmDraft> | null>(ALARM_DRAFT_KEY, null);
+  const now = new Date();
+  const savedHour = saved?.pickHour;
+  const savedMinute = saved?.pickMinute;
+  const savedLabel = saved?.pickLabel;
+  const savedDays = saved?.pickDays;
+  return {
+    pickHour: isIntegerInRange(savedHour, 0, 23) ? savedHour : now.getHours(),
+    pickMinute: isIntegerInRange(savedMinute, 0, 59) ? savedMinute : now.getMinutes(),
+    pickLabel: typeof savedLabel === 'string' ? savedLabel : '',
+    pickDays: Array.isArray(savedDays)
+      ? [...new Set(savedDays.filter((day) => isIntegerInRange(day, 0, 6)))]
+      : [],
+  };
+}
+
+const WEEK_DAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+
+function buildLocaleOrderedWeek(bcp47: string): { dayIndex: number; name: string }[] {
+  let firstDay = 0; // 0 = Sun, 1 = Mon, 6 = Sat
+  try {
+    const loc = new Intl.Locale(bcp47) as Intl.Locale & {
+      getWeekInfo?: () => { firstDay?: number };
+      weekInfo?: { firstDay?: number };
+    };
+    const info = loc.getWeekInfo?.() ?? loc.weekInfo;
+    if (info && typeof info.firstDay === 'number') {
+      firstDay = info.firstDay % 7; // ISO 7 -> 0 (Sunday), 1 -> 1 (Monday), 6 -> 6 (Saturday)
+    }
+  } catch {
+    firstDay = bcp47.startsWith('ar') ? 6 : 0;
+  }
+  return Array.from({ length: 7 }, (_, idx) => {
+    const dayIndex = (firstDay + idx) % 7;
+    return { dayIndex, name: WEEK_DAY_NAMES[dayIndex] };
+  });
+}
+
+// Suggested alarm times grouped by the part of the day.
+const ALARM_DIRECTORY: {
+  groupKey: 'morning' | 'afternoon' | 'evening' | 'night';
+  times: { label: string; h: number; m: number }[];
+}[] = [
+  {
+    groupKey: 'morning',
+    times: [
+      { label: '4:00 AM', h: 4, m: 0 },
+      { label: '4:15 AM', h: 4, m: 15 },
+      { label: '4:30 AM', h: 4, m: 30 },
+      { label: '4:45 AM', h: 4, m: 45 },
+      { label: '5:00 AM', h: 5, m: 0 },
+      { label: '5:15 AM', h: 5, m: 15 },
+      { label: '5:30 AM', h: 5, m: 30 },
+      { label: '5:45 AM', h: 5, m: 45 },
+      { label: '6:00 AM', h: 6, m: 0 },
+      { label: '6:15 AM', h: 6, m: 15 },
+      { label: '6:30 AM', h: 6, m: 30 },
+      { label: '6:45 AM', h: 6, m: 45 },
+      { label: '7:00 AM', h: 7, m: 0 },
+      { label: '7:15 AM', h: 7, m: 15 },
+      { label: '7:30 AM', h: 7, m: 30 },
+      { label: '7:45 AM', h: 7, m: 45 },
+      { label: '8:00 AM', h: 8, m: 0 },
+      { label: '8:15 AM', h: 8, m: 15 },
+      { label: '8:30 AM', h: 8, m: 30 },
+      { label: '8:45 AM', h: 8, m: 45 },
+      { label: '9:00 AM', h: 9, m: 0 },
+      { label: '9:15 AM', h: 9, m: 15 },
+      { label: '9:30 AM', h: 9, m: 30 },
+      { label: '9:45 AM', h: 9, m: 45 },
+      { label: '10:00 AM', h: 10, m: 0 },
+      { label: '10:30 AM', h: 10, m: 30 },
+      { label: '11:00 AM', h: 11, m: 0 },
+      { label: '11:30 AM', h: 11, m: 30 },
+    ],
+  },
+  {
+    groupKey: 'afternoon',
+    times: [
+      { label: '12:00 PM', h: 12, m: 0 },
+      { label: '12:30 PM', h: 12, m: 30 },
+      { label: '1:00 PM', h: 13, m: 0 },
+      { label: '1:30 PM', h: 13, m: 30 },
+      { label: '2:00 PM', h: 14, m: 0 },
+      { label: '2:30 PM', h: 14, m: 30 },
+      { label: '3:00 PM', h: 15, m: 0 },
+      { label: '3:30 PM', h: 15, m: 30 },
+      { label: '4:00 PM', h: 16, m: 0 },
+      { label: '4:30 PM', h: 16, m: 30 },
+      { label: '5:00 PM', h: 17, m: 0 },
+      { label: '5:30 PM', h: 17, m: 30 },
+    ],
+  },
+  {
+    groupKey: 'evening',
+    times: [
+      { label: '6:00 PM', h: 18, m: 0 },
+      { label: '6:30 PM', h: 18, m: 30 },
+      { label: '7:00 PM', h: 19, m: 0 },
+      { label: '7:30 PM', h: 19, m: 30 },
+      { label: '8:00 PM', h: 20, m: 0 },
+      { label: '8:30 PM', h: 20, m: 30 },
+      { label: '9:00 PM', h: 21, m: 0 },
+      { label: '9:30 PM', h: 21, m: 30 },
+      { label: '10:00 PM', h: 22, m: 0 },
+      { label: '10:30 PM', h: 22, m: 30 },
+      { label: '11:00 PM', h: 23, m: 0 },
+      { label: '11:30 PM', h: 23, m: 30 },
+    ],
+  },
+  {
+    groupKey: 'night',
+    times: [
+      { label: '12:00 AM', h: 0, m: 0 },
+      { label: '12:30 AM', h: 0, m: 30 },
+      { label: '1:00 AM', h: 1, m: 0 },
+      { label: '1:30 AM', h: 1, m: 30 },
+      { label: '2:00 AM', h: 2, m: 0 },
+      { label: '2:30 AM', h: 2, m: 30 },
+      { label: '3:00 AM', h: 3, m: 0 },
+      { label: '3:30 AM', h: 3, m: 30 },
+      { label: '4:00 AM', h: 4, m: 0 },
+      { label: '4:30 AM', h: 4, m: 30 },
+    ],
+  },
+];
+
+export function formatAlarmDisplay(hour24: number, minute: number, use24: boolean): string {
   const mm = String(minute).padStart(2, '0');
-  if (use24Hour) {
+  if (use24) {
     return `${String(hour24).padStart(2, '0')}:${mm}`;
   }
   const period = hour24 >= 12 ? 'PM' : 'AM';
@@ -98,65 +177,135 @@ export function formatAlarmDisplay(hour24: number, minute: number, use24Hour: bo
   return `${h12}:${mm} ${period}`;
 }
 
-function nextAlarmTimestamp(hour24: number, minute: number, days: number[]): number {
-  const from = new Date();
-  for (let i = 0; i <= 7; i++) {
-    const at = new Date(from.getFullYear(), from.getMonth(), from.getDate() + i, hour24, minute, 0, 0);
-    if (at.getTime() > from.getTime() && (days.length === 0 || days.includes(at.getDay()))) {
-      return at.getTime();
+type IntlWithListFormat = typeof Intl & {
+  ListFormat?: new (
+    locale: string,
+    options?: { type?: 'conjunction' | 'disjunction' | 'unit'; style?: 'long' | 'short' | 'narrow' }
+  ) => { format: (items: string[]) => string };
+};
+
+function summarizeDays(
+  days: number[],
+  t: UIStrings,
+  bcp47: string,
+  orderedWeek: { dayIndex: number; name: string }[]
+): string {
+  if (!days || days.length === 0) return t.repeatOnce;
+  if (days.length === 7) return t.repeatEveryDay;
+  const sorted = [...days].sort((a, b) => a - b);
+  if (sorted.length === 5 && sorted.every((d, idx) => d === idx + 1)) return t.repeatWeekdays;
+  if (sorted.length === 2 && sorted[0] === 0 && sorted[1] === 6) return t.repeatWeekends;
+
+  const shortNames = orderedWeek
+    .filter((w) => days.includes(w.dayIndex))
+    .map((w) =>
+      new Intl.DateTimeFormat(bcp47, { weekday: 'short' }).format(
+        new Date(2026, 10, 1 + w.dayIndex)
+      )
+    );
+  try {
+    const ListFmt = (Intl as IntlWithListFormat).ListFormat;
+    if (ListFmt) {
+      return new ListFmt(bcp47, { type: 'unit', style: 'narrow' }).format(shortNames);
     }
+  } catch {
+    // fallback below
   }
-  return from.getTime() + 86400000;
+  return shortNames.join(', ');
 }
 
-function describeUntil(targetMs: number): string {
-  const minutes = Math.max(1, Math.ceil((targetMs - Date.now()) / 60000));
-  const d = Math.floor(minutes / 1440);
-  const h = Math.floor((minutes % 1440) / 60);
-  const m = minutes % 60;
-  const parts: string[] = [];
-  if (d) parts.push(`${d} ${d === 1 ? 'day' : 'days'}`);
-  if (h) parts.push(`${h} ${h === 1 ? 'hour' : 'hours'}`);
-  if (m && !d) parts.push(`${m} ${m === 1 ? 'minute' : 'minutes'}`);
-  return `Alarm set for ${parts.join(', ')} from now.`;
+function nextAlarmTimestamp(hour24: number, minute: number, days: number[]): number {
+  const now = new Date();
+  for (let add = 0; add < 8; add++) {
+    const candidate = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + add,
+      hour24,
+      minute,
+      0,
+      0
+    );
+    if (candidate.getTime() <= now.getTime()) continue;
+    if (!days.length || days.includes(candidate.getDay())) {
+      return candidate.getTime();
+    }
+  }
+  return now.getTime();
+}
+
+function describeUntil(targetMs: number, t: UIStrings, bcp47: string): string {
+  const totalMins = Math.max(1, Math.round((targetMs - Date.now()) / 60000));
+  const d = Math.floor(totalMins / 1440);
+  const h = Math.floor((totalMins % 1440) / 60);
+  const m = totalMins % 60;
+
+  let formattedSpan = '';
+  try {
+    const dFmt = new Intl.NumberFormat(`${bcp47}-u-nu-latn`, {
+      style: 'unit',
+      unit: 'day',
+      unitDisplay: 'long',
+    });
+    const hFmt = new Intl.NumberFormat(`${bcp47}-u-nu-latn`, {
+      style: 'unit',
+      unit: 'hour',
+      unitDisplay: 'long',
+    });
+    const mFmt = new Intl.NumberFormat(`${bcp47}-u-nu-latn`, {
+      style: 'unit',
+      unit: 'minute',
+      unitDisplay: 'long',
+    });
+    const parts: string[] = [];
+    if (d > 0) parts.push(dFmt.format(d));
+    if (h > 0) parts.push(hFmt.format(h));
+    if (m > 0 && d === 0) parts.push(mFmt.format(m));
+    const ListFmt = (Intl as IntlWithListFormat).ListFormat;
+    if (ListFmt) {
+      formattedSpan = new ListFmt(bcp47, {
+        type: 'conjunction',
+        style: 'long',
+      }).format(parts);
+    } else {
+      formattedSpan = parts.join(' ');
+    }
+  } catch {
+    const parts: string[] = [];
+    if (d > 0) parts.push(`${d} ${d === 1 ? 'day' : 'days'}`);
+    if (h > 0) parts.push(`${h} ${h === 1 ? 'hour' : 'hours'}`);
+    if (m > 0 && d === 0) parts.push(`${m} ${m === 1 ? 'minute' : 'minutes'}`);
+    formattedSpan = parts.join(' and ');
+  }
+
+  return t.alarmSetToastTemplate.replace('{time}', formattedSpan);
 }
 
 export const AlarmPage: React.FC<AlarmPageProps> = ({
   settings,
+  alarms,
+  setAlarms,
+  ringingAlarm,
+  setRingingAlarm,
   onShowToast,
-  alarms: externalAlarms,
-  onChangeAlarms,
+  onUpdateSettings,
 }) => {
+  const [initialDraft] = useState<AlarmDraft>(readInitialAlarmDraft);
+  const [now, setNow] = useState<Date>(() => new Date());
+  const [pickHour, setPickHour] = useState<number>(initialDraft.pickHour);
+  const [pickMinute, setPickMinute] = useState<number>(initialDraft.pickMinute);
+  const [pickLabel, setPickLabel] = useState<string>(initialDraft.pickLabel);
+  const [pickDays, setPickDays] = useState<number[]>(initialDraft.pickDays);
+  const [expandedRepeatIds, setExpandedRepeatIds] = useState<Record<string, boolean>>({});
+
   const t = getStrings(settings.language);
   const langMeta = getLanguageMeta(settings.language);
   const isAr = settings.language === 'ar';
 
-  const [now, setNow] = useState<Date>(() => new Date());
-  const [localAlarms, setLocalAlarms] = useState<AlarmItem[]>(() =>
-    readStorage<AlarmItem[]>(ALARMS_STORAGE_KEY, [])
+  const orderedWeek = useMemo(
+    () => buildLocaleOrderedWeek(langMeta.bcp47),
+    [langMeta.bcp47]
   );
-  const alarms = externalAlarms ?? localAlarms;
-  const setAlarms = onChangeAlarms ?? setLocalAlarms;
-
-  const initialDraft = readStorage<AlarmDraft | null>(ALARM_DRAFT_KEY, null);
-  const [pickHour, setPickHour] = useState<number>(() =>
-    initialDraft ? initialDraft.pickHour : new Date().getHours()
-  );
-  const [pickMinute, setPickMinute] = useState<number>(() =>
-    initialDraft ? initialDraft.pickMinute : new Date().getMinutes()
-  );
-  const [pickLabel, setPickLabel] = useState<string>(() => initialDraft?.pickLabel ?? '');
-  const [pickDays, setPickDays] = useState<number[]>(() =>
-    Array.isArray(initialDraft?.pickDays) ? initialDraft.pickDays : []
-  );
-  const [expandedRepeatIds, setExpandedRepeatIds] = useState<Record<string, boolean>>({});
-  const [ringingAlarm, setRingingAlarm] = useState<AlarmItem | null>(null);
-
-  useEffect(() => {
-    if (!onChangeAlarms) {
-      writeStorage(ALARMS_STORAGE_KEY, localAlarms);
-    }
-  }, [localAlarms, onChangeAlarms]);
 
   useEffect(() => {
     writeStorage<AlarmDraft>(ALARM_DRAFT_KEY, {
@@ -167,82 +316,79 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
     });
   }, [pickHour, pickMinute, pickLabel, pickDays]);
 
-  useEffect(() => {
-    return () => {
-      if (!onChangeAlarms) stopAlarmLoop();
-    };
-  }, [onChangeAlarms]);
-
+  // Wall-clock aligned tick + resync on visibilitychange
   useEffect(() => {
     let timerId: number;
-    const tick = () => {
-      const current = new Date();
-      setNow(current);
-
-      // Only run local alarm firing when App.tsx is not managing alarms globally
-      if (!onChangeAlarms) {
-        const h = current.getHours();
-        const m = current.getMinutes();
-        const dow = current.getDay();
-        const key = `${current.getFullYear()}-${current.getMonth()}-${current.getDate()}-${h}-${m}`;
-
-        setLocalAlarms((prev) => {
-          let fired: AlarmItem | null = null;
-          let changed = false;
-
-          const updated = prev.map((al) => {
-            if (!fired && al.snoozeUntil && current.getTime() >= al.snoozeUntil) {
-              fired = al;
-              changed = true;
-              return { ...al, snoozeUntil: undefined };
-            }
-            if (!fired && al.enabled) {
-              const matchesDay = al.days.length === 0 || al.days.includes(dow);
-              if (matchesDay && al.hour24 === h && al.minute === m && al.lastTriggeredKey !== key) {
-                fired = al;
-                changed = true;
-                return { ...al, lastTriggeredKey: key };
-              }
-            }
-            return al;
-          });
-
-          if (fired) {
-            const targetAlarm = fired;
-            window.setTimeout(() => {
-              setRingingAlarm(targetAlarm);
-              startAlarmLoop(
-                settings.soundProfile,
-                Math.max(10, settings.volume),
-                settings.gradualVolume
-              );
-            }, 0);
-          }
-          return changed ? updated : prev;
-        });
-      }
-
-      timerId = window.setTimeout(tick, 1000 - (Date.now() % 1000) + 5);
+    const schedule = () => {
+      const ms = Date.now();
+      timerId = window.setTimeout(() => {
+        setNow(new Date());
+        schedule();
+      }, 1000 - (ms % 1000) + 5);
     };
+    schedule();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        window.clearTimeout(timerId);
+        setNow(new Date());
+        schedule();
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.clearTimeout(timerId);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
 
-    timerId = window.setTimeout(tick, 1000 - (Date.now() % 1000) + 5);
-    return () => window.clearTimeout(timerId);
-  }, [settings, onChangeAlarms]);
-
-  const toggleNewDay = (d: number) => {
+  const toggleNewDay = (dayIdx: number) => {
     setPickDays((prev) =>
-      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a, b) => a - b)
+      prev.includes(dayIdx)
+        ? prev.filter((d) => d !== dayIdx)
+        : [...prev, dayIdx].sort((a, b) => a - b)
     );
   };
 
-  const addOrEnableAlarm = (hour24: number, minute: number, labelText: string, days: number[]) => {
-    const duplicate = alarms.find((a) => a.hour24 === hour24 && a.minute === minute);
-    if (duplicate) {
-      onShowToast?.(
-        `An alarm for ${formatAlarmDisplay(hour24, minute, settings.use24Hour)} already exists.`
-      );
+  const addOrEnableAlarm = (
+    hour24: number,
+    minute: number,
+    labelText: string,
+    days: number[]
+  ) => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+
+    const dayKey = [...days].sort((a, b) => a - b).join(',');
+    const dup = alarms.find(
+      (a) =>
+        a.hour24 === hour24 &&
+        a.minute === minute &&
+        [...a.days].sort((x, y) => x - y).join(',') === dayKey
+    );
+
+    if (dup) {
+      if (!dup.enabled) {
+        setAlarms((prev) =>
+          prev.map((a) =>
+            a.id === dup.id ? { ...a, enabled: true, snoozeUntil: undefined } : a
+          )
+        );
+        onShowToast?.(
+          describeUntil(nextAlarmTimestamp(hour24, minute, days), t, langMeta.bcp47)
+        );
+      } else {
+        onShowToast?.(
+          t.alarmDuplicateToastTemplate.replace(
+            '{time}',
+            formatAlarmDisplay(hour24, minute, settings.use24Hour)
+          ),
+          'error'
+        );
+      }
       return;
     }
+
     const item: AlarmItem = {
       id: `alarm-${Date.now()}`,
       hour24,
@@ -253,9 +399,13 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
       vibrate: false,
     };
     setAlarms((prev) =>
-      [...prev, item].sort((a, b) => a.hour24 * 60 + a.minute - (b.hour24 * 60 + b.minute))
+      [...prev, item].sort(
+        (a, b) => a.hour24 * 60 + a.minute - (b.hour24 * 60 + b.minute)
+      )
     );
-    onShowToast?.(describeUntil(nextAlarmTimestamp(hour24, minute, days)));
+    onShowToast?.(
+      describeUntil(nextAlarmTimestamp(hour24, minute, days), t, langMeta.bcp47)
+    );
   };
 
   const handleAddAlarm = (e: React.FormEvent) => {
@@ -291,11 +441,14 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
       prev.map((al) => (al.id === ringingAlarm.id ? { ...al, snoozeUntil: until } : al))
     );
     onShowToast?.(
-      `Snoozed until ${formatAlarmDisplay(
-        untilDate.getHours(),
-        untilDate.getMinutes(),
-        settings.use24Hour
-      )}`
+      t.snoozedUntilTemplate.replace(
+        '{time}',
+        formatAlarmDisplay(
+          untilDate.getHours(),
+          untilDate.getMinutes(),
+          settings.use24Hour
+        )
+      )
     );
     setRingingAlarm(null);
   };
@@ -313,12 +466,19 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
   }).format(now);
   const dayStr = new Intl.DateTimeFormat(langMeta.bcp47, { weekday: 'long' }).format(now);
 
+  const directoryGroupLabel = (key: 'morning' | 'afternoon' | 'evening' | 'night') => {
+    if (key === 'morning') return isAr ? 'الصباح' : 'Morning';
+    if (key === 'afternoon') return isAr ? 'بعد الظهر' : 'Afternoon';
+    if (key === 'evening') return isAr ? 'المساء' : 'Evening';
+    return isAr ? 'الليل' : 'Night';
+  };
+
   return (
     <>
-      <div className="page-content-wrapper">
-        <div id="alarm-page" className="page-container">
+      <div className="sd-page-content-wrapper">
+        <div id="alarm-page" className="sd-page-container">
           <div
-            className="flip-display"
+            className="sd-flip-display"
             role="timer"
             aria-label={`${hoursStr}:${minutesStr}`}
           >
@@ -333,7 +493,7 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
             </FlipCard>
           </div>
 
-          <div className="controls hide-in-fullscreen">
+          <div className="controls sd-hide-in-fullscreen">
             <a
               href="#alarm-setup"
               onClick={(e) => {
@@ -342,9 +502,9 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
                   .getElementById('alarm-setup')
                   ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
               }}
-              className="btn btn-primary"
+              className="btn sd-btn-primary"
             >
-              <Plus className="w-[18px] h-[18px]" />
+              <Icon name="add" />
               <span>{t.addAlarm}</span>
             </a>
           </div>
@@ -352,10 +512,10 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
       </div>
 
       {/* Alarm Setup & List Panels */}
-      <div className="page-panels">
+      <div className="sd-page-panels">
         <section id="alarm-setup" className="panel" aria-labelledby="set-alarm-heading">
-          <div className="panel-header">
-            <h2 id="set-alarm-heading" className="panel-title">
+          <div className="sd-panel-header">
+            <h2 id="set-alarm-heading" className="sd-panel-title">
               {t.setNewAlarm}
             </h2>
           </div>
@@ -376,12 +536,13 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
             />
 
             <div className="mt-4">
-              <label htmlFor="alarm-label-input" className="field-label">
+              <label htmlFor="alarm-label-input" className="sd-field-label">
                 {t.labelField}
               </label>
               <input
                 id="alarm-label-input"
                 type="text"
+                maxLength={60}
                 value={pickLabel}
                 onChange={(e) => setPickLabel(e.target.value)}
                 placeholder={isAr ? 'استيقاظ، اجتماع، مذاكرة...' : 'Wake up, Meeting, Study...'}
@@ -390,12 +551,14 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
             </div>
 
             <div className="mt-4">
-              <div className="field-head">
-                <span className="field-label">{t.repeatField}</span>
-                <span className="field-hint">{summarizeDays(pickDays, t, langMeta.bcp47)}</span>
+              <div className="sd-field-head">
+                <span className="sd-field-label">{t.repeatField}</span>
+                <span className="sd-field-hint">
+                  {summarizeDays(pickDays, t, langMeta.bcp47, orderedWeek)}
+                </span>
               </div>
-              <div className="day-picker" role="group" aria-label={t.repeatField}>
-                {PICKER_DAYS.map((d) => {
+              <div className="sd-day-picker" role="group" aria-label={t.repeatField}>
+                {orderedWeek.map((d) => {
                   const pressed = pickDays.includes(d.dayIndex);
                   const narrowDay = new Intl.DateTimeFormat(langMeta.bcp47, {
                     weekday: 'narrow',
@@ -407,7 +570,7 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
                       aria-pressed={pressed}
                       aria-label={d.name}
                       onClick={() => toggleNewDay(d.dayIndex)}
-                      className="day-chip"
+                      className="sd-day-chip"
                     >
                       {narrowDay}
                     </button>
@@ -416,52 +579,67 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
               </div>
             </div>
 
-            <button type="submit" className="btn btn-primary btn-block mt-5">
+            {onUpdateSettings ? (
+              <div className="mt-4">
+                <InlineRingtoneBar
+                  value={settings.soundProfile}
+                  volume={Math.max(15, settings.volume)}
+                  t={t}
+                  onChange={(next) => onUpdateSettings({ soundProfile: next })}
+                />
+              </div>
+            ) : null}
+
+            <button type="submit" className="btn sd-btn-primary sd-btn-block mt-5">
               {t.addAlarm}
             </button>
           </form>
         </section>
 
         <section className="panel" aria-labelledby="alarms-list-heading">
-          <div className="panel-header">
-            <h2 id="alarms-list-heading" className="panel-title">
+          <div className="sd-panel-header">
+            <h2 id="alarms-list-heading" className="sd-panel-title">
               {t.alarmsTitle}
             </h2>
           </div>
 
           {alarms.length === 0 ? (
-            <p className="empty-state">{t.noAlarmsSet}</p>
+            <p className="sd-empty-state">{t.noAlarmsSet}</p>
           ) : (
-            <ul className="alarm-list">
+            <ul className="sd-alarm-list">
               {alarms.map((al) => {
                 const isExpanded = !!expandedRepeatIds[al.id];
                 const snoozedDate = al.snoozeUntil ? new Date(al.snoozeUntil) : null;
                 return (
                   <li
                     key={al.id}
-                    className={`alarm-item ${!al.enabled && !al.snoozeUntil ? 'inactive' : ''}`.trim()}
+                    className={`sd-alarm-item ${
+                      !al.enabled && !al.snoozeUntil ? 'inactive' : ''
+                    }`.trim()}
                   >
-                    <div className="alarm-details">
-                      <span className="alarm-time" dir="ltr">
+                    <div className="sd-alarm-details">
+                      <span className="sd-alarm-time" dir="ltr">
                         {formatAlarmDisplay(al.hour24, al.minute, settings.use24Hour)}
                       </span>
-                      {al.label ? <span className="alarm-label">{al.label}</span> : null}
+                      {al.label ? <span className="sd-alarm-label">{al.label}</span> : null}
                       {snoozedDate ? (
-                        <span className="alarm-snoozed">
-                          <Clock className="w-[14px] h-[14px]" />
+                        <span className="sd-alarm-snoozed">
+                          <Icon name="snooze" />
                           <span dir="ltr">
-                            {t.snooze}:{' '}
-                            {formatAlarmDisplay(
-                              snoozedDate.getHours(),
-                              snoozedDate.getMinutes(),
-                              settings.use24Hour
+                            {t.snoozedUntilTemplate.replace(
+                              '{time}',
+                              formatAlarmDisplay(
+                                snoozedDate.getHours(),
+                                snoozedDate.getMinutes(),
+                                settings.use24Hour
+                              )
                             )}
                           </span>
                         </span>
                       ) : null}
 
                       {/* Inline Repeat Expander Chip + Vibrate Toggle Chip */}
-                      <div className="alarm-options">
+                      <div className="sd-alarm-options">
                         <button
                           type="button"
                           aria-expanded={isExpanded}
@@ -471,20 +649,24 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
                               [al.id]: !prev[al.id],
                             }))
                           }
-                          className={`repeat-chip ${al.days.length > 0 ? 'on' : ''}`.trim()}
+                          className={`sd-repeat-chip ${al.days.length > 0 ? 'on' : ''}`.trim()}
                         >
-                          <Repeat className="w-[13px] h-[13px]" />
-                          <span>{summarizeDays(al.days, t, langMeta.bcp47)}</span>
+                          <Icon name="repeat" />
+                          <span>
+                            {summarizeDays(al.days, t, langMeta.bcp47, orderedWeek)}
+                          </span>
                         </button>
 
-                        <label className="option-chip">
+                        <label className="sd-option-chip">
                           <input
                             type="checkbox"
                             checked={!!al.vibrate}
                             onChange={(e) =>
                               setAlarms((prev) =>
                                 prev.map((item) =>
-                                  item.id === al.id ? { ...item, vibrate: e.target.checked } : item
+                                  item.id === al.id
+                                    ? { ...item, vibrate: e.target.checked }
+                                    : item
                                 )
                               )
                             }
@@ -494,7 +676,7 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
                       </div>
                     </div>
 
-                    <div className="alarm-controls">
+                    <div className="sd-alarm-controls">
                       <label
                         className="switch"
                         aria-label={`Toggle alarm ${formatAlarmDisplay(
@@ -521,7 +703,11 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
                             );
                             if (checked) {
                               onShowToast?.(
-                                describeUntil(nextAlarmTimestamp(al.hour24, al.minute, al.days))
+                                describeUntil(
+                                  nextAlarmTimestamp(al.hour24, al.minute, al.days),
+                                  t,
+                                  langMeta.bcp47
+                                )
                               );
                             }
                           }}
@@ -534,16 +720,16 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
                         onClick={() =>
                           setAlarms((prev) => prev.filter((item) => item.id !== al.id))
                         }
-                        className="icon-button delete-alarm-btn"
+                        className="sd-icon-button sd-delete-alarm-btn"
                         aria-label="Delete alarm"
                       >
-                        <Trash2 className="w-[18px] h-[18px]" />
+                        <Icon name="delete" />
                       </button>
                     </div>
 
                     {isExpanded ? (
-                      <div className="day-picker compact" role="group" aria-label={t.repeatField}>
-                        {PICKER_DAYS.map((d) => {
+                      <div className="sd-day-picker compact" role="group" aria-label={t.repeatField}>
+                        {orderedWeek.map((d) => {
                           const pressed = al.days.includes(d.dayIndex);
                           const narrowDay = new Intl.DateTimeFormat(langMeta.bcp47, {
                             weekday: 'narrow',
@@ -565,7 +751,7 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
                                   })
                                 )
                               }
-                              className="day-chip"
+                              className="sd-day-chip"
                             >
                               {narrowDay}
                             </button>
@@ -581,38 +767,64 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
         </section>
       </div>
 
-      {/* Editorial Guide + Alarm Times Directory */}
-      <article className="info-article">
+      {/* Original alarm guide and suggested-time directory. */}
+      <article className="sd-info-article">
         {isAr ? (
           <>
-            <h2>ما هي ساعة المنبّه عبر المتصفح؟</h2>
+            <h2>منبّه يعمل ما دامت الصفحة مفتوحة</h2>
             <p>
-              تجمع ساعة المنبّه بين عرض الساعة القلّابة المباشر والتنبيهات الصوتية المجدولة داخل المتصفح،
-              مع إمكانية تكرار المنبّه في أيام محددة، واختيار النغمة، وتفعيل رفع الصوت تدريجياً، وتخصيص مدة الغفوة.
+              أضف تنبيهاً لوقت محدد، واختر له اسماً ونغمة وأيام تكرار إن أردت. تحفظ الأداة إعدادات المنبّهات
+              في هذا المتصفح، لكن تشغيلها يعتمد على بقاء صفحة التطبيق والمتصفح قيد العمل.
             </p>
-            <p>يرجى إبقاء تبويب المتصفح مفتوحاً ليعمل المنبّه في الموعد المحدد.</p>
+            <h2>اضبط وقتاً وجدولاً واضحين</h2>
+            <p>
+              اختر الساعة والدقيقة، ثم حدّد يوماً واحداً أو أكثر للتكرار، أو اترك الأيام دون تحديد لمنبّه
+              لمرة واحدة. أضف تسمية تساعدك على تمييزه بين بقية التنبيهات.
+            </p>
+            <h2>تحقّق من الصوت قبل الاعتماد عليه</h2>
+            <p>
+              جرّب النغمة، وارفع مستوى الجهاز إلى مستوى مسموع، واختر مدة الغفوة أو زيادة الصوت تدريجياً من
+              الإعدادات. قد يوقف نظام التشغيل الصفحة إذا أُغلق المتصفح أو دخل الجهاز في وضع السكون.
+            </p>
+            <h2>عند رنين المنبّه</h2>
+            <p>
+              اختر إيقافاً لإنهاء التنبيه أو غفوة لتأجيله. راجع قائمة المنبّهات بعد ذلك لتعطيل الجدول أو
+              تعديله أو حذفه.
+            </p>
           </>
         ) : (
           <>
-            <h2>What Is a Browser Split-Flap Alarm Clock?</h2>
+            <h2>A scheduled reminder in this browser</h2>
             <p>
-              An online alarm clock pairs a live split-flap clock display with scheduled audio alerts
-              right inside your browser. Choose any wake-up or reminder time, pick repeating weekdays,
-              and customize tones, gradual volume ramp, and snooze length in settings.
+              Add an alert for a particular time, give it a label and tone, and choose repeat days if useful.
+              Alarm details are saved in this browser, but the reminder depends on the app page and browser
+              continuing to run.
             </p>
+            <h2>Set a time and repeat pattern</h2>
             <p>
-              Keep this browser tab open so the alarm engine can monitor the system clock and ring on
-              time.
+              Choose an hour and minute, then select the weekdays for a recurring reminder—or leave them
+              clear for a one-time alert. A short label makes each entry easier to recognize in the list.
+            </p>
+            <h2>Check the sound and device settings</h2>
+            <p>
+              Preview the selected tone, keep the device volume audible, and configure snooze or gradual
+              volume in settings. An operating system may suspend a page when the browser closes or the
+              device sleeps, so this is not a replacement for a dedicated bedside clock.
+            </p>
+            <h2>Respond when the alert sounds</h2>
+            <p>
+              Dismiss the alert to stop it, or use Snooze to postpone it. Afterwards, you can disable,
+              revise, or remove the schedule from the alarms list.
             </p>
           </>
         )}
 
-        <div className="link-directory">
+        <div id="sd-alarm-suggestions" className="sd-link-directory">
           <h2>{t.alarmTimes}</h2>
           {ALARM_DIRECTORY.map((sec) => (
-            <div key={sec.group}>
-              <h3>{sec.group}</h3>
-              <div className="chip-row link-chips">
+            <div key={sec.groupKey}>
+              <h3>{directoryGroupLabel(sec.groupKey)}</h3>
+              <div className="sd-chip-row sd-link-chips">
                 {sec.times.map((tm) => (
                   <button
                     key={tm.label}
@@ -636,32 +848,32 @@ export const AlarmPage: React.FC<AlarmPageProps> = ({
       </article>
 
       {ringingAlarm ? (
-        <div className="modal-overlay">
+        <div className="sd-modal-overlay visible">
           <div
             role="alertdialog"
             aria-modal="true"
             aria-label={t.dockAlarm}
-            className="ring-modal"
+            className="sd-ring-modal"
           >
-            <div className="modal-icon">
-              <BellRing className="w-[30px] h-[30px]" />
+            <div className="sd-modal-icon">
+              <Icon name="notifications_active" />
             </div>
-            <div className="modal-time" dir="ltr">
+            <div className="sd-modal-time" dir="ltr">
               {formatAlarmDisplay(ringingAlarm.hour24, ringingAlarm.minute, settings.use24Hour)}
             </div>
-            <div className="modal-label">{ringingAlarm.label || t.dockAlarm}</div>
-            <div className="modal-actions">
+            <div className="sd-modal-label">{ringingAlarm.label || t.dockAlarm}</div>
+            <div className="sd-modal-actions">
               <button
                 type="button"
                 onClick={handleDismissRinging}
-                className="btn btn-lg btn-primary btn-block"
+                className="btn sd-btn-lg sd-btn-primary sd-btn-block"
               >
                 {t.ok}
               </button>
               <button
                 type="button"
                 onClick={handleSnooze}
-                className="btn btn-lg btn-secondary btn-block"
+                className="btn sd-btn-lg sd-btn-secondary sd-btn-block"
               >
                 {t.snooze}
               </button>

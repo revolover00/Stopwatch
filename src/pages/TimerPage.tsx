@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BellRing, Pause, Play, RotateCcw } from 'lucide-react';
 import { FlipCard, FlipColon } from '../components/FlipCard';
 import { DurationWheelPicker } from '../components/IOSTimerWheelPicker';
+import { InlineRingtoneBar } from '../components/RingtoneSelector';
+import { Icon } from '../components/Icon';
 import type { AppSettings } from '../types';
 import {
   playSoundOnce,
@@ -14,20 +15,17 @@ import { getStrings } from '../i18n';
 
 interface TimerPageProps {
   settings: AppSettings;
-  externalSecondsPreset?: number | null;
-  onConsumeExternalPreset?: () => void;
+  presetSeconds?: number | null;
+  onConsumePreset?: () => void;
+  onUpdateSettings?: (partial: Partial<AppSettings>) => void;
 }
 
-interface PersistedTimerState {
-  totalSeconds: number;
-  remainingMs: number;
-  endAt: number;
-  running: boolean;
+interface PresetChip {
+  label: string;
+  seconds: number;
 }
 
-const TIMER_STATE_KEY = 'splitflap_timer_state_v2';
-
-const PRESETS: { label: string; seconds: number }[] = [
+const PRESETS: PresetChip[] = [
   { label: '15 sec', seconds: 15 },
   { label: '20 sec', seconds: 20 },
   { label: '30 sec', seconds: 30 },
@@ -47,25 +45,44 @@ const PRESETS: { label: string; seconds: number }[] = [
 ];
 
 const DIR_SECONDS = [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 45, 50, 60, 90, 100, 1000];
-const DIR_MINUTES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40, 45, 50, 60, 75, 90, 120, 180];
-const DIR_HOURS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 18, 24, 36, 48, 72];
+const DIR_MINUTES = [
+  ...Array.from({ length: 60 }, (_, i) => i + 1),
+  70, 75, 80, 90, 100, 120, 150, 180,
+];
+const DIR_HOURS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 16, 18, 20, 24, 36, 48, 72];
+
+const TIMER_STATE_KEY = 'splitdeck:v1:timer-state';
+const MAX_RING_MS = 15 * 60 * 1000;
+
+interface PersistedTimerState {
+  totalSeconds: number;
+  remainingMs: number;
+  endAt: number;
+  running: boolean;
+}
 
 export const TimerPage: React.FC<TimerPageProps> = ({
   settings,
-  externalSecondsPreset,
-  onConsumeExternalPreset,
+  presetSeconds,
+  onConsumePreset,
+  onUpdateSettings,
 }) => {
   const t = getStrings(settings.language);
   const isAr = settings.language === 'ar';
 
   const initialTimer = useMemo(() => {
-    const saved = readStorage<PersistedTimerState>(TIMER_STATE_KEY, {
-      totalSeconds: 300,
-      remainingMs: 300 * 1000,
-      endAt: 0,
-      running: false,
-    });
-    const total = Math.max(0, Math.min(99 * 3600 + 59 * 60 + 59, Number(saved.totalSeconds) || 300));
+    const saved = readStorage<PersistedTimerState | null>(TIMER_STATE_KEY, null);
+    if (!saved || typeof saved.totalSeconds !== 'number' || saved.totalSeconds <= 0) {
+      return {
+        totalSeconds: 300,
+        remainingSeconds: 300,
+        remainingMs: 300000,
+        endAt: 0,
+        running: false,
+        expiredWhileAway: false,
+      };
+    }
+    const total = Math.max(0, Math.min(99 * 3600 + 59 * 60 + 59, saved.totalSeconds));
     if (saved.running && saved.endAt > 0) {
       const leftMs = saved.endAt - Date.now();
       if (leftMs > 0) {
@@ -88,7 +105,7 @@ export const TimerPage: React.FC<TimerPageProps> = ({
       };
     }
     const remMs =
-      typeof saved.remainingMs === 'number' && saved.remainingMs >= 0
+      typeof saved.remainingMs === 'number' && saved.remainingMs > 0
         ? Math.min(total * 1000, saved.remainingMs)
         : total * 1000;
     return {
@@ -106,20 +123,21 @@ export const TimerPage: React.FC<TimerPageProps> = ({
   const [running, setRunning] = useState<boolean>(initialTimer.running);
   const [ringing, setRinging] = useState<boolean>(initialTimer.expiredWhileAway);
 
+  const [inH, setInH] = useState<number>(Math.floor(initialTimer.totalSeconds / 3600));
+  const [inM, setInM] = useState<number>(Math.floor((initialTimer.totalSeconds % 3600) / 60));
+  const [inS, setInS] = useState<number>(initialTimer.totalSeconds % 60);
+
   const endAtRef = useRef<number>(initialTimer.endAt);
   const remainingMsRef = useRef<number>(initialTimer.remainingMs);
-
-  const [inH, setInH] = useState<number>(() => Math.floor(initialTimer.totalSeconds / 3600));
-  const [inM, setInM] = useState<number>(() => Math.floor((initialTimer.totalSeconds % 3600) / 60));
-  const [inS, setInS] = useState<number>(() => initialTimer.totalSeconds % 60);
+  const ringCapTimerRef = useRef<number | null>(null);
 
   const persistTimer = useCallback(
-    (nextTotal: number, nextRemMs: number, nextEndAt: number, nextRunning: boolean) => {
+    (total: number, remMs: number, endAt: number, isRunning: boolean) => {
       writeStorage<PersistedTimerState>(TIMER_STATE_KEY, {
-        totalSeconds: nextTotal,
-        remainingMs: Math.max(0, nextRemMs),
-        endAt: nextEndAt,
-        running: nextRunning,
+        totalSeconds: total,
+        remainingMs: Math.max(0, remMs),
+        endAt,
+        running: isRunning,
       });
     },
     []
@@ -131,104 +149,97 @@ export const TimerPage: React.FC<TimerPageProps> = ({
     setInS(secs % 60);
   };
 
+  useEffect(() => {
+    if (presetSeconds && presetSeconds > 0) {
+      stopAlarmLoop();
+      endAtRef.current = 0;
+      remainingMsRef.current = presetSeconds * 1000;
+      setRunning(false);
+      setRinging(false);
+      setTotalSeconds(presetSeconds);
+      setRemainingSeconds(presetSeconds);
+      syncCustomInputs(presetSeconds);
+      persistTimer(presetSeconds, presetSeconds * 1000, 0, false);
+      onConsumePreset?.();
+    }
+  }, [presetSeconds, onConsumePreset, persistTimer]);
+
+  // Listen for SettingsDrawer Reset to Defaults when idle
+  useEffect(() => {
+    const onReset = () => {
+      if (!running && !ringing) {
+        endAtRef.current = 0;
+        remainingMsRef.current = 300000;
+        setTotalSeconds(300);
+        setRemainingSeconds(300);
+        syncCustomInputs(300);
+        persistTimer(300, 300000, 0, false);
+      }
+    };
+    window.addEventListener('settingsreset', onReset);
+    return () => window.removeEventListener('settingsreset', onReset);
+  }, [running, ringing, persistTimer]);
+
+  useEffect(() => {
+    return () => {
+      stopAlarmLoop();
+      if (ringCapTimerRef.current !== null) {
+        window.clearTimeout(ringCapTimerRef.current);
+      }
+    };
+  }, []);
+
   const triggerTimerComplete = useCallback(() => {
-    endAtRef.current = 0;
-    remainingMsRef.current = 0;
     setRunning(false);
     setRemainingSeconds(0);
+    remainingMsRef.current = 0;
+    endAtRef.current = 0;
     setRinging(true);
     persistTimer(totalSeconds, 0, 0, false);
 
     if (settings.soundEnabled) {
       if (settings.ringUntilStopped) {
-        startAlarmLoop(settings.soundProfile, settings.volume, settings.gradualVolume);
+        startAlarmLoop(settings.soundProfile, settings.volume, false);
+        if (ringCapTimerRef.current !== null) {
+          window.clearTimeout(ringCapTimerRef.current);
+        }
+        ringCapTimerRef.current = window.setTimeout(() => {
+          stopAlarmLoop();
+        }, MAX_RING_MS);
       } else {
         playSoundOnce(settings.soundProfile, settings.volume);
       }
     }
-    sendDesktopNotification(t.timesUp, `${t.headerTimer}`);
+    sendDesktopNotification(t.headerTimer, t.timesUp);
   }, [
-    persistTimer,
     totalSeconds,
+    persistTimer,
     settings.soundEnabled,
     settings.ringUntilStopped,
     settings.soundProfile,
     settings.volume,
-    settings.gradualVolume,
-    t.timesUp,
     t.headerTimer,
+    t.timesUp,
   ]);
-
-  const startOrResume = useCallback(() => {
-    const baseMs =
-      remainingMsRef.current > 0 ? remainingMsRef.current : totalSeconds * 1000;
-    if (baseMs <= 0) return;
-    const nextEnd = Date.now() + baseMs;
-    endAtRef.current = nextEnd;
-    remainingMsRef.current = baseMs;
-    setRinging(false);
-    setRemainingSeconds(Math.max(1, Math.ceil(baseMs / 1000)));
-    setRunning(true);
-    persistTimer(totalSeconds, baseMs, nextEnd, true);
-  }, [totalSeconds, persistTimer]);
-
-  const pauseTimer = useCallback(() => {
-    const leftMs = Math.max(0, endAtRef.current - Date.now());
-    endAtRef.current = 0;
-    remainingMsRef.current = leftMs;
-    setRunning(false);
-    setRemainingSeconds(Math.ceil(leftMs / 1000));
-    persistTimer(totalSeconds, leftMs, 0, false);
-  }, [totalSeconds, persistTimer]);
-
-  const resetTimer = useCallback(() => {
-    stopAlarmLoop();
-    endAtRef.current = 0;
-    remainingMsRef.current = totalSeconds * 1000;
-    setRunning(false);
-    setRinging(false);
-    setRemainingSeconds(totalSeconds);
-    persistTimer(totalSeconds, totalSeconds * 1000, 0, false);
-  }, [totalSeconds, persistTimer]);
-
-  useEffect(() => {
-    if (externalSecondsPreset && externalSecondsPreset > 0) {
-      const secs = Math.min(99 * 3600 + 59 * 60 + 59, externalSecondsPreset);
-      stopAlarmLoop();
-      endAtRef.current = 0;
-      remainingMsRef.current = secs * 1000;
-      setRunning(false);
-      setRinging(false);
-      setTotalSeconds(secs);
-      setRemainingSeconds(secs);
-      syncCustomInputs(secs);
-      persistTimer(secs, secs * 1000, 0, false);
-      onConsumeExternalPreset?.();
-    }
-  }, [externalSecondsPreset, onConsumeExternalPreset, persistTimer]);
-
-  useEffect(() => {
-    return () => stopAlarmLoop();
-  }, []);
 
   useEffect(() => {
     if (!running) return;
     if (!endAtRef.current) {
-      endAtRef.current = Date.now() + Math.max(1000, remainingSeconds * 1000);
+      endAtRef.current = Date.now() + remainingMsRef.current;
     }
 
     const checkTick = () => {
       const leftMs = endAtRef.current - Date.now();
       if (leftMs <= 0) {
         triggerTimerComplete();
-        return;
+      } else {
+        remainingMsRef.current = leftMs;
+        setRemainingSeconds(Math.max(1, Math.ceil(leftMs / 1000)));
       }
-      remainingMsRef.current = leftMs;
-      setRemainingSeconds(Math.max(1, Math.ceil(leftMs / 1000)));
     };
 
     checkTick();
-    const id = window.setInterval(checkTick, 200);
+    const id = window.setInterval(checkTick, 150);
     const onVis = () => {
       if (document.visibilityState === 'visible') checkTick();
     };
@@ -237,18 +248,68 @@ export const TimerPage: React.FC<TimerPageProps> = ({
       window.clearInterval(id);
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, [running, remainingSeconds, triggerTimerComplete]);
+  }, [running, triggerTimerComplete]);
 
+  const startOrResume = useCallback(() => {
+    if (totalSeconds <= 0) return;
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+    stopAlarmLoop();
+    setRinging(false);
+    const baseMs =
+      remainingMsRef.current > 0 ? remainingMsRef.current : totalSeconds * 1000;
+    remainingMsRef.current = baseMs;
+    const nextEnd = Date.now() + baseMs;
+    endAtRef.current = nextEnd;
+    setRemainingSeconds(Math.max(1, Math.ceil(baseMs / 1000)));
+    setRunning(true);
+    persistTimer(totalSeconds, baseMs, nextEnd, true);
+  }, [totalSeconds, persistTimer]);
+
+  const pauseTimer = useCallback(() => {
+    if (!running) return;
+    const leftMs = Math.max(0, endAtRef.current - Date.now());
+    endAtRef.current = 0;
+    remainingMsRef.current = leftMs;
+    setRunning(false);
+    setRemainingSeconds(Math.ceil(leftMs / 1000));
+    persistTimer(totalSeconds, leftMs, 0, false);
+  }, [running, totalSeconds, persistTimer]);
+
+  const resetTimer = useCallback(() => {
+    stopAlarmLoop();
+    if (ringCapTimerRef.current !== null) {
+      window.clearTimeout(ringCapTimerRef.current);
+      ringCapTimerRef.current = null;
+    }
+    endAtRef.current = 0;
+    remainingMsRef.current = totalSeconds * 1000;
+    setRunning(false);
+    setRinging(false);
+    setRemainingSeconds(totalSeconds);
+    persistTimer(totalSeconds, totalSeconds * 1000, 0, false);
+  }, [totalSeconds, persistTimer]);
+
+  // Space toggles Start/Pause, Escape dismisses Ringing modal
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (ringing) {
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape' || e.code === 'Space' || e.key === 'Enter') {
+          e.preventDefault();
           resetTimer();
         }
         return;
       }
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        document.body.classList.contains('settings-open')
+      ) {
+        return;
+      }
       if (e.code === 'Space' && !e.repeat && totalSeconds > 0) {
         e.preventDefault();
         if (running) pauseTimer();
@@ -293,6 +354,10 @@ export const TimerPage: React.FC<TimerPageProps> = ({
 
   const handleRestartFromRing = () => {
     stopAlarmLoop();
+    if (ringCapTimerRef.current !== null) {
+      window.clearTimeout(ringCapTimerRef.current);
+      ringCapTimerRef.current = null;
+    }
     setRinging(false);
     remainingMsRef.current = totalSeconds * 1000;
     const nextEnd = Date.now() + totalSeconds * 1000;
@@ -322,25 +387,28 @@ export const TimerPage: React.FC<TimerPageProps> = ({
     };
   }, [running, isPausedMidway]);
 
+  // Reflect the remaining duration and completion state in the browser tab title.
   useEffect(() => {
-    if (running || isPausedMidway) {
+    if (ringing) {
+      document.title = `⏰ ${t.timesUp} · ${t.headerTimer}`;
+    } else if (running || isPausedMidway) {
       const prefix = hrs !== '00' ? `${hrs}:${mins}:${secs}` : `${mins}:${secs}`;
       document.title = `${prefix} · ${t.headerTimer}`;
     } else {
-      document.title = `${t.headerTimer} — Flip Clock`;
+      document.title = t.headerTimer;
     }
     return () => {
-      document.title = 'Flip Clock';
+      document.title = t.headerClock;
     };
-  }, [running, isPausedMidway, hrs, mins, secs, t.headerTimer]);
+  }, [ringing, running, isPausedMidway, hrs, mins, secs, t.timesUp, t.headerTimer, t.headerClock]);
 
   return (
     <>
-      <div className="page-content-wrapper">
-        <div id="timer-page" className="page-container">
-          <div className="timer-face">
+      <div className="sd-page-content-wrapper">
+        <div id="timer-page" className="sd-page-container">
+          <div className="sd-timer-face">
             <div
-              className={`flip-display ${ringing ? 'is-finished' : ''}`.trim()}
+              className={`sd-flip-display sd-timer-display ${ringing ? 'is-finished' : ''}`.trim()}
               role="timer"
               aria-label={`${hrs} hours ${mins} minutes ${secs} seconds`}
             >
@@ -352,25 +420,25 @@ export const TimerPage: React.FC<TimerPageProps> = ({
             </div>
 
             <div
-              className={`timer-progress ${running || isPausedMidway ? 'running' : ''}`.trim()}
+              className={`sd-timer-progress ${running || isPausedMidway ? 'running' : ''}`.trim()}
               aria-hidden="true"
             >
               <div
-                className="timer-progress-bar"
+                className="sd-timer-progress-bar"
                 style={{ transform: `scaleX(${progress})` }}
               />
             </div>
           </div>
 
-          {/* Primary Equal Controls (remain visible in Fullscreen per aflipclock.com) */}
+          {/* Keep the main timer controls aligned in normal and fullscreen layouts. */}
           <div className="controls equal">
             <button
               type="button"
               disabled={!running && remainingSeconds === totalSeconds}
               onClick={resetTimer}
-              className="btn btn-lg btn-secondary"
+              className="btn sd-btn-lg sd-btn-secondary"
             >
-              <RotateCcw className="w-[18px] h-[18px]" />
+              <Icon name="refresh" />
               <span>{t.reset}</span>
             </button>
 
@@ -381,24 +449,19 @@ export const TimerPage: React.FC<TimerPageProps> = ({
                 if (running) pauseTimer();
                 else startOrResume();
               }}
-              className="btn btn-lg btn-primary"
+              className="btn sd-btn-lg sd-btn-primary"
             >
-              {running ? (
-                <>
-                  <Pause className="w-[18px] h-[18px]" />
-                  <span>{t.pause}</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-[18px] h-[18px]" />
-                  <span>{isPausedMidway ? t.resume : t.start}</span>
-                </>
-              )}
+              <Icon name={running ? 'pause' : 'play_arrow'} />
+              <span className="sd-btn-labels">
+                <span className={!running && !isPausedMidway ? 'on' : ''}>{t.start}</span>
+                <span className={running ? 'on' : ''}>{t.pause}</span>
+                <span className={!running && isPausedMidway ? 'on' : ''}>{t.resume}</span>
+              </span>
             </button>
           </div>
 
-          {/* 16 Authentic Preset Chips + Custom Time H:M:S */}
-          <div className={`timer-setup hide-in-fullscreen ${running ? 'locked' : ''}`.trim()}>
+          {/* 16 Authentic Preset Chips + Custom Time H:M:S + Inline Ringtone Bar */}
+          <div className={`sd-timer-setup sd-hide-in-fullscreen ${running ? 'locked' : ''}`.trim()}>
             <div id="presets-container" role="group" aria-label="Timer presets">
               {PRESETS.map((p) => (
                 <button
@@ -414,8 +477,8 @@ export const TimerPage: React.FC<TimerPageProps> = ({
               ))}
             </div>
 
-            <div className="custom-time-group">
-              <span className="custom-time-heading">{t.customTime}</span>
+            <div className="sd-custom-time-group">
+              <span className="sd-custom-time-heading">{t.customTime}</span>
               <DurationWheelPicker
                 hours={inH}
                 minutes={inM}
@@ -428,52 +491,67 @@ export const TimerPage: React.FC<TimerPageProps> = ({
                 soundEnabled={settings.soundEnabled}
                 onChange={handleInputChange}
               />
+
+              {onUpdateSettings ? (
+                <InlineRingtoneBar
+                  value={settings.soundProfile}
+                  volume={settings.volume}
+                  disabled={running || !settings.soundEnabled}
+                  t={t}
+                  onChange={(next) => onUpdateSettings({ soundProfile: next })}
+                />
+              ) : null}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Editorial Guide + All Timers Directory */}
-      <article className="info-article">
+      {/* Original timer guide and preset directory. */}
+      <article className="sd-info-article">
         {isAr ? (
           <>
-            <h2>ما هو المؤقت القلّاب عبر الإنترنت؟</h2>
+            <h2>حوّل المدة إلى عدّ واضح</h2>
             <p>
-              يعدّ المؤقت تنازلياً من أي مدة تختارها ويصدر تنبيهاً صوتياً واضحاً فور وصول الوقت إلى الصفر،
-              مع بطاقات كبيرة واضحة للساعات والدقائق والثواني.
+              اختر وقتاً تنازلياً لمهمة قصيرة أو فترة عمل أطول. تبقى الساعات والدقائق والثواني ظاهرة على
+              الشاشة، ويتفعّل التنبيه الذي اخترته عند انتهاء المدة.
             </p>
-            <h2>كيفية استخدام المؤقت</h2>
-            <ul>
-              <li>اختر إحدى المدد الجاهزة من 15 ثانية حتى 60 دقيقة، أو أدخل وقتاً مخصصاً.</li>
-              <li>اضغط على <strong>بدء</strong> (أو مفتاح المسافة Space) للبدء، و<strong>إيقاف مؤقت</strong> للتوقف، و<strong>إعادة ضبط</strong> للعودة للمدة الأصلية.</li>
-            </ul>
+            <h2>اختر مدة أو أدخلها بنفسك</h2>
+            <p>
+              ابدأ بأحد الأزرار السريعة، أو اضبط الساعات والدقائق والثواني من عجلة الاختيار. اضغط بدء
+              للتشغيل، والمسافة للإيقاف أو المتابعة، وإعادة الضبط للعودة إلى المدة المختارة.
+            </p>
+            <h2>اضبط طريقة التنبيه</h2>
+            <p>
+              استخدم الإعدادات لاختيار صوت ومستوى مناسبين. ويمكنك إبقاء الرنين مستمراً حتى توقفه يدوياً؛
+              سيظل المؤقت معتمداً على بقاء صفحة التطبيق مفتوحة وعمل المتصفح.
+            </p>
           </>
         ) : (
           <>
-            <h2>What Is an Online Split-Flap Timer?</h2>
+            <h2>Give each task a visible time limit</h2>
             <p>
-              An online timer counts down from any chosen duration and plays a clear sound alert as soon
-              as the clock hits zero. Large mechanical-style cards make remaining hours, minutes, and
-              seconds effortless to read across a room.
+              Set a countdown for a quick chore or a longer work block. Hours, minutes, and seconds remain
+              on screen, and your chosen alert can play when the remaining time reaches zero.
             </p>
-
-            <h2>How to Use the Timer</h2>
-            <ul>
-              <li>Tap one of the sixteen quick-duration chips—from 15 seconds up to 60 minutes.</li>
-              <li>Or type exact hours, minutes, and seconds into the Custom Time boxes.</li>
-              <li>
-                Press <strong>Start</strong> (or hit <strong>Space</strong>) to begin,{' '}
-                <strong>Pause</strong> to hold, and <strong>Reset</strong> to return to your set time.
-              </li>
-            </ul>
+            <h2>Choose a preset or dial in a duration</h2>
+            <p>
+              Start with a one-tap duration, or set hours, minutes, and seconds with the wheel controls. Use
+              Start to run the clock, Space to pause or continue, and Reset to return to the selected length.
+            </p>
+            <h2>Decide how the finish should sound</h2>
+            <p>
+              Settings let you select a tone and adjust its volume. You can also keep the alarm playing until
+              you dismiss it. Like other browser timers, this page must remain open and the browser must be
+              allowed to run for the alert to fire.
+            </p>
           </>
         )}
 
-        <div className="link-directory">
+        <div id="sd-preset-directory" className="sd-link-directory">
           <h2>{t.allTimers}</h2>
 
           <h3>{t.seconds}</h3>
-          <div className="chip-row link-chips">
+          <div className="sd-chip-row sd-link-chips">
             {DIR_SECONDS.map((s) => (
               <button
                 key={`s-${s}`}
@@ -481,13 +559,13 @@ export const TimerPage: React.FC<TimerPageProps> = ({
                 onClick={() => handleSelectPreset(s)}
                 className="chip"
               >
-                {s} {t.seconds}
+                {s} {s === 1 && !isAr ? 'Second' : t.seconds}
               </button>
             ))}
           </div>
 
           <h3>{t.minutes}</h3>
-          <div className="chip-row link-chips">
+          <div className="sd-chip-row sd-link-chips">
             {DIR_MINUTES.map((m) => (
               <button
                 key={`m-${m}`}
@@ -495,13 +573,13 @@ export const TimerPage: React.FC<TimerPageProps> = ({
                 onClick={() => handleSelectPreset(m * 60)}
                 className="chip"
               >
-                {m} {t.minutes}
+                {m} {m === 1 && !isAr ? 'Minute' : t.minutes}
               </button>
             ))}
           </div>
 
           <h3>{t.hours}</h3>
-          <div className="chip-row link-chips">
+          <div className="sd-chip-row sd-link-chips">
             {DIR_HOURS.map((h) => (
               <button
                 key={`h-${h}`}
@@ -509,7 +587,7 @@ export const TimerPage: React.FC<TimerPageProps> = ({
                 onClick={() => handleSelectPreset(h * 3600)}
                 className="chip"
               >
-                {h} {t.hours}
+                {h} {h === 1 && !isAr ? 'Hour' : t.hours}
               </button>
             ))}
           </div>
@@ -517,31 +595,33 @@ export const TimerPage: React.FC<TimerPageProps> = ({
       </article>
 
       {ringing ? (
-        <div className="modal-overlay" onClick={handleDismissRing}>
+        <div className="sd-modal-overlay visible" onClick={handleDismissRing}>
           <div
             role="alertdialog"
             aria-modal="true"
             aria-label={t.timesUp}
-            className="ring-modal"
+            className="sd-ring-modal"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="modal-icon">
-              <BellRing className="w-[30px] h-[30px]" />
+            <div className="sd-modal-icon">
+              <Icon name="notifications_active" />
             </div>
-            <div className="modal-time" dir="ltr">{ringDurationText}</div>
-            <div className="modal-label">{t.timesUp}</div>
-            <div className="modal-actions">
+            <div className="sd-modal-time" dir="ltr">
+              {ringDurationText}
+            </div>
+            <div className="sd-modal-label">{t.timesUp}</div>
+            <div className="sd-modal-actions">
               <button
                 type="button"
                 onClick={handleDismissRing}
-                className="btn btn-lg btn-primary btn-block"
+                className="btn sd-btn-lg sd-btn-primary sd-btn-block"
               >
                 {t.ok}
               </button>
               <button
                 type="button"
                 onClick={handleRestartFromRing}
-                className="btn btn-lg btn-secondary btn-block"
+                className="btn sd-btn-lg sd-btn-secondary sd-btn-block"
               >
                 {t.restart}
               </button>

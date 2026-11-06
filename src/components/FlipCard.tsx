@@ -51,32 +51,32 @@ export const FlipCard: React.FC<FlipCardProps> = ({
 
   return (
     <div className={`card ${className}`.trim()}>
-      {srLabel ? <span className="sr-only">{srLabel}</span> : null}
+      {srLabel ? <span className="sd-sr-only">{srLabel}</span> : null}
 
-      {topLeft ? <span className="meta-display date-display">{topLeft}</span> : null}
-      {topRight ? <span className="meta-display day-display">{topRight}</span> : null}
-      {bottomLeft ? <span className="meta-display ampm-display">{bottomLeft}</span> : null}
+      {topLeft ? <span className="sd-meta-display sd-date-display">{topLeft}</span> : null}
+      {topRight ? <span className="sd-meta-display sd-day-display">{topRight}</span> : null}
+      {bottomLeft ? <span className="sd-meta-display sd-ampm-display">{bottomLeft}</span> : null}
 
-      <div className="flip-card-container" aria-hidden="true">
-        <div className="flip-unit">
+      <div className="sd-flip-card-container" aria-hidden="true">
+        <div className="sd-flip-unit">
           {/* Static upper half: shows incoming value */}
-          <div className="flip-top">
-            <span className="flip-text">{current}</span>
+          <div className="sd-flip-top">
+            <span className="sd-flip-text">{current}</span>
           </div>
 
           {/* Static lower half: shows previous while flipping, then current */}
-          <div className="flip-bottom">
-            <span className="flip-text">{animPhase !== 'none' ? previous : current}</span>
+          <div className="sd-flip-bottom">
+            <span className="sd-flip-text">{animPhase !== 'none' ? previous : current}</span>
           </div>
 
           {/* Animated falling top leaf: shows previous value */}
-          <div className={`flip-panel flip-panel-top ${panelClass}`.trim()}>
-            <span className="flip-text">{previous}</span>
+          <div className={`sd-flip-panel sd-flip-panel-top ${panelClass}`.trim()}>
+            <span className="sd-flip-text">{previous}</span>
           </div>
 
           {/* Animated landing bottom leaf: shows incoming value */}
-          <div className={`flip-panel flip-panel-bottom ${panelClass}`.trim()}>
-            <span className="flip-text">{current}</span>
+          <div className={`sd-flip-panel sd-flip-panel-bottom ${panelClass}`.trim()}>
+            <span className="sd-flip-text">{current}</span>
           </div>
         </div>
       </div>
@@ -111,31 +111,31 @@ export const SecondsFlip: React.FC<{ value: string; srLabel?: string }> = ({ val
 
   return (
     <>
-      {srLabel ? <span className="sr-only">{srLabel}</span> : null}
-      <div className="seconds-flip" aria-hidden="true">
-        <div className="seconds-half seconds-top">
-          <span className="seconds-text">{current}</span>
+      {srLabel ? <span className="sd-sr-only">{srLabel}</span> : null}
+      <div className="sd-seconds-flip" aria-hidden="true">
+        <div className="sd-seconds-half sd-seconds-top">
+          <span className="sd-seconds-text">{current}</span>
         </div>
-        <div className="seconds-half seconds-bottom">
-          <span className="seconds-text">{turnClass !== 'none' ? previous : current}</span>
+        <div className="sd-seconds-half sd-seconds-bottom">
+          <span className="sd-seconds-text">{turnClass !== 'none' ? previous : current}</span>
         </div>
-        <div className={`seconds-panel seconds-panel-top ${cls}`.trim()}>
-          <span className="seconds-text">{previous}</span>
+        <div className={`sd-seconds-panel sd-seconds-panel-top ${cls}`.trim()}>
+          <span className="sd-seconds-text">{previous}</span>
         </div>
-        <div className={`seconds-panel seconds-panel-bottom ${cls}`.trim()}>
-          <span className="seconds-text">{current}</span>
+        <div className={`sd-seconds-panel sd-seconds-panel-bottom ${cls}`.trim()}>
+          <span className="sd-seconds-text">{current}</span>
         </div>
       </div>
     </>
   );
 };
 
-export const FlipColon: React.FC = () => <div className="flip-colon" aria-hidden="true" />;
+export const FlipColon: React.FC = () => <div className="sd-flip-colon" aria-hidden="true" />;
 
 export const CentisCard: React.FC<{ value: string }> = ({ value }) => (
-  <div className="card centis-card" aria-hidden="true">
-    <div className="flip-card-container">
-      <span className="flip-text">{value}</span>
+  <div className="card sd-centis-card" aria-hidden="true">
+    <div className="sd-flip-card-container">
+      <span className="sd-flip-text">{value}</span>
     </div>
     <div className="divider" />
   </div>

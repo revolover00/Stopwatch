@@ -9,12 +9,20 @@ export type FlipStyle = 'simple' | 'standard' | 'pro';
 export type LayoutMode = 'auto' | 'horizontal' | 'vertical';
 
 export type SoundProfile =
-  | 'bell'
+  | 'siren'
+  | 'airhorn'
+  | 'airraid'
+  | 'firetruck'
+  | 'firebell'
+  | 'rooster'
   | 'piano'
+  | 'bell'
+  | 'guitar'
   | 'melody'
-  | 'chime'
-  | 'sunrise'
+  | 'kalimba'
   | 'harmony'
+  | 'sunrise'
+  | 'chime'
   | 'crystal'
   | 'beacon'
   | 'digital'
@@ -103,7 +111,7 @@ export interface StudySessionRecord {
 
 export interface LapRecord {
   lapNumber: number;
-  lapMs: number;
+  splitMs: number;
   totalMs: number;
 }
 
@@ -125,11 +133,22 @@ export interface AlarmItem {
 }
 
 export const SOUND_OPTIONS: { value: SoundProfile; label: string }[] = [
-  { value: 'bell', label: 'Bell Sound (Default)' },
-  { value: 'classic', label: 'Classic Alarm' },
-  { value: 'beacon', label: 'Beacon' },
+  { value: 'siren', label: 'Siren' },
+  { value: 'airhorn', label: 'Air Horn' },
+  { value: 'airraid', label: 'Air Raid' },
+  { value: 'firetruck', label: 'Fire Truck' },
+  { value: 'firebell', label: 'Fire Bell' },
+  { value: 'rooster', label: 'Rooster' },
+  { value: 'piano', label: 'Piano' },
+  { value: 'bell', label: 'Bell' },
+  { value: 'guitar', label: 'Guitar' },
+  { value: 'melody', label: 'Melody' },
+  { value: 'kalimba', label: 'Kalimba' },
+  { value: 'harmony', label: 'Harmony' },
   { value: 'sunrise', label: 'Sunrise' },
-  { value: 'chime', label: 'Gentle Chime' },
-  { value: 'digital', label: 'Digital Beep' },
-  { value: 'melody', label: 'Short Melody' },
+  { value: 'chime', label: 'Chime' },
+  { value: 'crystal', label: 'Crystal' },
+  { value: 'beacon', label: 'Beacon' },
+  { value: 'digital', label: 'Digital' },
+  { value: 'classic', label: 'Classic' },
 ];
