@@ -1,149 +1,129 @@
-<div align="center">
+# SplitDeck
 
-# ⏱️ SplitFlap — Minimalist 3D Flip Clock & Time Suite
+A browser-based suite for reading, comparing, and timing the day. SplitDeck combines a flip-style local clock, a city-focused world clock, and five dedicated timing tools in one responsive interface.
 
-### **ساعة قلّابة احترافية متكاملة بـ 6 أدوات زمنية، 4 مظاهر، و24 لغة منها العربية (RTL)**
+![SplitDeck local clock in dark theme](docs/screenshots/clock-dark.png)
 
-<p>
-  <img src="https://img.shields.io/badge/React-19-0a84ff?style=for-the-badge&logo=react&logoColor=white" alt="React 19" />
-  <img src="https://img.shields.io/badge/TypeScript-5.8-3178c6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Vite-6-646cff?style=for-the-badge&logo=vite&logoColor=white" alt="Vite 6" />
-  <img src="https://img.shields.io/badge/Languages-24%20%2B%20Arabic%20RTL-30d158?style=for-the-badge" alt="24 Languages + Arabic RTL" />
-  <img src="https://img.shields.io/badge/Audio-Web%20Audio%20Synth-ff453a?style=for-the-badge" alt="Web Audio API" />
-</p>
+## The seven views
 
-<p>
-  <a href="#-live-gallery--screenshots"><b>📸 Screenshots</b></a> •
-  <a href="#-6-in-1-time-suite"><b>⚡ 6-in-1 Suite</b></a> •
-  <a href="#-24-languages--native-arabic-rtl"><b>🌍 24 Languages + العربية</b></a> •
-  <a href="#-themes--3d-split-flap-physics"><b>🎨 Themes & Physics</b></a> •
-  <a href="#-quick-start"><b>🚀 Quick Start</b></a>
-</p>
+1. **Local clock** — large flip cards with 12/24-hour format, seconds, date and weekday, fullscreen, and display controls.
+2. **World clock** — compare saved cities, search the city directory, and use a 15-minute-step planner to shift the comparison time by up to 24 hours in either direction. Country and U.S. state directories select representative cities.
+3. **Study timer** — work, short-break, and long-break sessions; configurable cycles and daily goals; tasks, session history, progress summaries, CSV export, and an optional focus tick.
+4. **Timer** — quick durations from 15 seconds through 60 minutes, or a custom duration up to 99:59:59.
+5. **Stopwatch** — centisecond display, lap splits, and fastest/slowest lap highlighting.
+6. **Countdown** — a saved event date and time, quick presets, holiday suggestions, and an optional completion alert.
+7. **Alarm clock** — one-time or repeating alarms, labels, ringtone previews, volume and gradual-volume controls, plus snooze.
 
-<br />
+The main clock and world clock are two modes of the same view. The world directory currently contains **192 city entries, 91 country links, and 50 U.S. state links**.
 
-<img src="./docs/screenshots/hero-clock-dark.png" alt="SplitFlap Current Time Flip Clock, World Clock & 24-Language Switcher" width="100%" />
+## Screenshots
 
-</div>
+The images below are current screenshots from the application—not mockups.
 
----
+<table>
+  <tbody>
+    <tr>
+      <td><strong>Local clock</strong><br><img src="docs/screenshots/clock-dark.png" alt="Local flip clock in the dark theme" width="100%"></td>
+      <td><strong>World clock planner</strong><br><img src="docs/screenshots/world-clock-planner.png" alt="World clock with saved cities and time planner" width="100%"></td>
+    </tr>
+    <tr>
+      <td><strong>Searchable city picker</strong><br><img src="docs/screenshots/city-picker.png" alt="City picker searching for Riyadh" width="100%"></td>
+      <td><strong>Study timer</strong><br><img src="docs/screenshots/study-focus.png" alt="Pomodoro study timer in a work session" width="100%"></td>
+    </tr>
+    <tr>
+      <td><strong>Timer and custom wheel</strong><br><img src="docs/screenshots/timer.png" alt="Timer with presets and a custom 3D wheel picker" width="100%"></td>
+      <td><strong>Stopwatch laps</strong><br><img src="docs/screenshots/stopwatch-laps.png" alt="Stopwatch showing two recorded lap splits" width="100%"></td>
+    </tr>
+    <tr>
+      <td><strong>Countdown</strong><br><img src="docs/screenshots/countdown.png" alt="Countdown to New Year's Day" width="100%"></td>
+      <td><strong>Alarm setup</strong><br><img src="docs/screenshots/alarm-setup.png" alt="Alarm form with a custom time wheel and repeat controls" width="100%"></td>
+    </tr>
+    <tr>
+      <td><strong>Settings</strong><br><img src="docs/screenshots/settings-themes.png" alt="Settings drawer with theme and display controls" width="100%"></td>
+      <td><strong>Arabic and right-to-left layout</strong><br><img src="docs/screenshots/arabic-rtl.png" alt="World clock in Arabic with right-to-left layout" width="100%"></td>
+    </tr>
+    <tr>
+      <td><strong>Country and state directories</strong><br><img src="docs/screenshots/world-directories.png" alt="Country links and U.S. state directory in the world clock" width="100%"></td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
 
-## ✨ Why SplitFlap?
+## Interface and implementation
 
-**SplitFlap** brings the tactile elegance of classic mechanical departure boards to the browser with Apple-inspired dark-room precision, zero external audio assets, and complete offline-capable persistence.
+- **24 interface languages**, including Arabic with RTL layout.
+- Four themes: Dark, Light, Midnight, and Sand; three flip styles; automatic, horizontal, and vertical layouts; adjustable size and corner radius.
+- Custom date, dropdown, and 3D wheel pickers. The interface does not use native browser `<select>` or `<input type="date">` controls.
+- React 18, TypeScript, and Vite. The time-wheel controls use `@ncdai/react-wheel-picker`.
+- Alarm and focus MP3 playback uses Howler. The audio files are bundled locally; the app does not request sound files from a remote service.
+- Local time-zone and city calculations use browser date/time-zone support and the bundled city directory.
 
-- **Authentic 3D Split-Flap Physics** — Hardware-accelerated 4-layer hinged flap cards (`top`, `bottom`, `flap-front`, `flap-back`) with perspective depth, dynamic shadow seams, and **3 visual styles** (*Simple*, *Standard*, *Professional*).
-- **6 Complete Time Tools in One Floating Dock** — Instant zero-reload switching between **Clock (+ World Clock)**, **Study Timer (Pomodoro)**, **Timer**, **Stopwatch**, **Countdown**, and **Alarm**.
-- **24 Languages + First-Class Arabic (`العربية`) RTL** — Native right-to-left sheet mirroring, Arabic typography, localized `Intl.DateTimeFormat` calendar dates & weekdays, while preserving universal `HH : MM : SS` card order.
-- **Pure Web Audio Synthesizer** — **7 rich alarm & focus tones** (*Bell*, *Classic*, *Beacon*, *Sunrise*, *Gentle Chime*, *Digital Beep*, *Short Melody*) + optional mechanical focus ticking, generated in real time with zero `.mp3` files.
+## Data and browser behavior
 
----
+There are no accounts or application backend. Settings, navigation, alarms and their draft, timer state, study tasks and history, stopwatch state, countdown, and world-clock preferences are stored in the current browser using `localStorage` under `splitdeck:v1:*` keys. Known legacy keys—including the original `splitflap_*_v2` tool keys, `splitflap_settings_v2`, `splitflap_suite_settings_v3`, and `flipSuiteWorldMain_v2`—are migrated when read. This is a local migration, not a sync service; clearing this site's browser data removes saved state.
 
-## 📸 Live Gallery & Screenshots
+The frontend source contains no analytics integration or application API client. Desktop notifications are browser-managed and require permission. Alarms and countdown alerts rely on the page and browser continuing to run; operating systems can throttle or suspend background tabs. Do not rely on a browser alarm as the only safety-critical alarm.
 
-### 🌍 Native Arabic (`العربية`) RTL + Per-Tool Settings Sheet
+## Audio sources and release status
 
-<img src="./docs/screenshots/arabic-rtl-settings.png" alt="Arabic RTL Interface and Settings Drawer" width="100%" />
+The Howler-based player keeps the full musical recordings as MP3s; the verified source tracks were converted and peak-normalized, with decoded peaks at or below **0.85**. `THIRD_PARTY_NOTICES.md` records source, attribution, license, and modification details for the 12 verified musical recordings, the Pomotroid focus tick, the Material Symbols icon paths, the SunCalc-derived solar calculation, and bundled runtime packages.
 
-<br />
+**Rights for six emergency-style recordings remain unverified:** `airhorn`, `airraid`, `firebell`, `firetruck`, `rooster`, and `siren`. Their original creators and license terms have not been reliably established. They remain in the app to preserve the current alarm profiles. The repository owner has authorized merging with this status unresolved; inclusion, normalization, and the project license do not establish redistribution rights. These files are outside the project MIT grant. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
-### 🎓 Pomodoro Study Timer & ⏱️ 10ms Precision Stopwatch
+The interface also intentionally preserves a close visual arrangement of the external reference site to meet the requested appearance. CSS selectors have been namespaced and the editorial copy rewritten, but no reusable license or permission for the reference site's stylesheet or visual design has been verified. The owner has authorized merging despite this unresolved review; refactoring does not grant rights or eliminate possible similarity risk. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
-| **Pomodoro Focus, Tasks & 7-Day Analytics** | **Centisecond Stopwatch & Best/Worst Lap Splits** |
-| :---: | :---: |
-| <img src="./docs/screenshots/study-pomodoro.png" alt="Pomodoro Study Timer" width="100%" /> | <img src="./docs/screenshots/stopwatch-laps.png" alt="Stopwatch with Lap Splits" width="100%" /> |
+## Privacy, Terms, and Contact
 
-<br />
+The repository currently contains **no Privacy page, Terms page, Contact page, or support address**, and the app footer does not link to any of them. No organization, jurisdiction, or contact details were supplied, so none have been invented. The frontend keeps its app data in browser storage and has no account or analytics service; hosting-provider request logs and policies are outside the app. Add formal policy pages and a real contact route only after the project owner supplies the applicable details.
 
-### 📅 Event Countdowns & 🔔 Multi-Schedule Alarm Clock
+## Development
 
-<img src="./docs/screenshots/countdown-alarm.png" alt="Countdown Timer and Alarm Clock" width="100%" />
+Use Node.js and npm:
 
-<br />
-
-### 🎨 4 Curated Studio Themes (`Dark` · `Light` · `Midnight` · `Sand`)
-
-<img src="./docs/screenshots/themes-grid.png" alt="Four Studio Themes Grid" width="100%" />
-
----
-
-## ⚡ 6-in-1 Time Suite
-
-| Tool | Highlights |
-| :--- | :--- |
-| **🕰️ Flip Clock & World Clock** | Live 12h / 24h split-flap clock, optional seconds & date/weekday badges, **24 global cities** (including Cairo, Riyadh, Dubai, London, NYC, Tokyo), solar sunrise/sunset times, and interactive **±24h Time Zone Planner** slider. |
-| **🎓 Study Timer (Pomodoro)** | Ambient session glow (*Red* Work · *Green* Short Break · *Blue* Long Break), *Classic 25-5-15* / *Short 15-3-9* / *Long 50-10-30* presets, **Task Estimator** with projected finish time, streak counter, 7d / 30d / 12m charts, and **CSV Export**. |
-| **⏳ Countdown Timer** | 16 one-tap duration chips (`15 sec` → `60 min`), custom `HH : MM : SS` fields, live progress bar, continuous ring-until-stopped mode, and quick-launch timer directory. |
-| **⏱️ Stopwatch** | High-precision `requestAnimationFrame` engine with baseline-aligned **centiseconds** flap card (`1/100s`) and live split table highlighting **Fastest Lap** in green and **Slowest Lap** in red. |
-| **📅 Event Countdown** | 4-unit `Days · Hours · Minutes · Seconds` display, custom date/time event creator, quick presets (*Midnight*, *Noon*, *Evening*), and live upcoming holiday countdown directory. |
-| **🔔 Alarm Clock** | Multiple persistent browser alarms, weekday repeat chips (*Once*, *Every Day*, *Weekdays*, *Weekends*, or custom days), gradual volume ramp, and configurable snooze duration (`1–30 min`). |
-
----
-
-## 🌍 24 Languages + Native Arabic RTL
-
-Switch instantly from the top-bar Globe menu (`.language-switcher`) across all **24 supported locales**:
-
-> `English` · **`العربية (RTL)`** · `Español` · `Deutsch` · `Français` · `Português` · `Italiano` · `Polski` · `Русский` · `Українська` · `Čeština` · `Suomi` · `Bahasa Indonesia` · `日本語` · `Nederlands` · `ไทย` · `繁體中文` · `Tiếng Việt` · `Dansk` · `Magyar` · `Norsk` · `Ελληνικά` · `Svenska` · `한국어`
-
----
-
-## ⌨️ Keyboard Shortcuts
-
-| Key | Action |
-| :---: | :--- |
-| <kbd>Space</kbd> | **Start / Pause / Resume** active Study session, Timer, or Stopwatch |
-| <kbd>F</kbd> | Toggle distraction-free **Fullscreen Mode** (or double-click to exit) |
-| <kbd>L</kbd> | Record a **Lap Split** while Stopwatch is running |
-| <kbd>R</kbd> | **Reset** Stopwatch when paused |
-| <kbd>Esc</kbd> | Close open Settings drawer, modals, or dismiss active alarm ring |
-
----
-
-## 🚀 Quick Start
-
-```bash
-# 1. Install dependencies
+```sh
 npm install
-
-# 2. Start local development server
 npm run dev
+```
 
-# 3. Build optimized production bundle
+The Vite development server listens on `0.0.0.0`. To type-check and build the production site:
+
+```sh
 npm run build
+npm run preview
+```
 
-# 4. (Optional) Build portable single-file HTML bundle
+To create a single-file HTML build with its assets inlined:
+
+```sh
 npm run build:single
 ```
 
----
+`npm run build` runs the TypeScript project build before Vite. There is currently no separate automated test or lint script in `package.json`.
 
-## 🗂️ Project Structure
+## Routes
 
-```text
-├── docs/screenshots/          # High-DPI Retina UI showcase screenshots
-├── src/
-│   ├── components/
-│   │   ├── FlipCard.tsx       # 3D split-flap card, colon & centisecond components
-│   │   ├── HeaderNav.tsx      # Top bar, 24-language dropdown & floating bottom dock
-│   │   ├── SettingsDrawer.tsx # Context-aware per-tool settings sheet
-│   │   └── Footer.tsx         # Quick navigation footer
-│   ├── pages/
-│   │   ├── ClockPage.tsx      # Flip Clock + World Clock + SunCalc + Time Planner
-│   │   ├── StudyPage.tsx      # Pomodoro timer, tasks & 7d/30d/12m analytics
-│   │   ├── TimerPage.tsx      # Duration timer + 16 presets + custom H:M:S
-│   │   ├── StopwatchPage.tsx  # 10ms stopwatch + best/worst lap splits
-│   │   ├── CountdownPage.tsx  # 4-card event & holiday countdowns
-│   │   └── AlarmPage.tsx      # Scheduled repeating browser alarms + snooze
-│   ├── utils/
-│   │   ├── soundEngine.ts     # 7-profile Web Audio synthesizer & alarm loop
-│   │   └── storage.ts         # Safe typed localStorage persistence
-│   ├── i18n.ts                # 24-language dictionary + RTL metadata
-│   ├── types.ts               # Shared TypeScript interfaces & defaults
-│   └── index.css              # Design tokens, 4 themes, 3 flip looks & RTL rules
-└── package.json
-```
+The app uses hash routes so it can be hosted as a static site. A fresh browser opens the local clock; without an explicit route, a returning browser restores the last selected tool.
 
-<div align="center">
-  <sub>Built with precision · Zero external trackers · 100% client-side privacy</sub>
-</div>
+| View | Route |
+| --- | --- |
+| Local clock | `#/clock` (also the fresh-install default) |
+| World clock | `#/world-clock` or `#/time` |
+| Study timer | `#/study` (`#/study-timer` is also accepted) |
+| Timer | `#/timer` |
+| Stopwatch | `#/stopwatch` |
+| Countdown | `#/countdown` |
+| Alarm | `#/alarm` |
+
+## Project map
+
+- `src/pages/` — the clock, study timer, timer, stopwatch, countdown, and alarm views.
+- `src/components/` — shared flip cards, navigation, settings, custom pickers, and ringtone controls.
+- `src/data/worldCities.ts` — city, country, state, and time-zone directory data.
+- `src/assets/sounds/` — locally bundled MP3 assets.
+- `src/utils/` — storage migration, audio playback, and screen wake-lock helpers.
+- `docs/screenshots/` — README screenshots.
+- `THIRD_PARTY_NOTICES.md` — third-party source and license inventory.
+
+## Project license
+
+The repository owner selected the MIT License for material they own; see [`LICENSE`](LICENSE). Its scope excludes third-party and externally sourced material identified in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md), including items whose rights remain unverified. The project license does not clear those materials or provide blanket rights to everything in the repository. The README and notices document provenance and known limitations; they are not legal advice or a claim of complete legal clearance.
