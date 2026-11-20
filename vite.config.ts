@@ -10,12 +10,12 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '0.0.0.0',
       port: 5173,
-      allowedHosts: true,
+      allowedHosts: ['.e2b.app', 'localhost'],
     },
     preview: {
       host: '0.0.0.0',
       port: 4173,
-      allowedHosts: true,
+      allowedHosts: ['.e2b.app', 'localhost'],
     },
   };
 });
