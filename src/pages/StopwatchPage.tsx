@@ -3,87 +3,42 @@ import { FlipCard, FlipColon } from '../components/FlipCard';
 import { Icon } from '../components/Icon';
 import type { AppSettings } from '../types';
 import { readStorage, writeStorage } from '../utils/storage';
+import { elapsedFromMonotonic, formatLapTime, restoreStopwatchState, type LapEntry, type PersistedStopwatchState } from '../utils/stopwatch';
 import { getStrings } from '../i18n';
 
 interface StopwatchPageProps {
   settings: AppSettings;
 }
 
-interface LapEntry {
-  lapNumber: number;
-  splitMs: number;
-  totalMs: number;
-}
-
 const SW_STATE_KEY = 'splitdeck:v1:stopwatch-state';
 
-interface PersistedStopwatchState {
-  running: boolean;
-  startedAtEpoch: number; // Date.now() - accumulatedMs when running
-  accumulatedMs: number;
-  laps: LapEntry[];
+function monotonicNow(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
 
-function formatLapTime(ms: number): string {
-  const totalCs = Math.floor(ms / 10);
-  const cs = totalCs % 100;
-  const totalSec = Math.floor(totalCs / 100);
-  const s = totalSec % 60;
-  const m = Math.floor(totalSec / 60) % 60;
-  const h = Math.floor(totalSec / 3600);
-  if (h > 0) {
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(
-      2,
-      '0'
-    )}.${String(cs).padStart(2, '0')}`;
-  }
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(
-    2,
-    '0'
-  )}`;
+function currentElapsed(monotonicStart: number | null, accumulatedMs: number): number {
+  return monotonicStart === null
+    ? Math.max(0, accumulatedMs)
+    : elapsedFromMonotonic(monotonicNow(), monotonicStart);
 }
 
 export const StopwatchPage: React.FC<StopwatchPageProps> = ({ settings }) => {
   const t = getStrings(settings.language);
   const isAr = settings.language === 'ar';
 
-  const initialSw = useMemo(() => {
-    const saved = readStorage<PersistedStopwatchState | null>(SW_STATE_KEY, null);
-    if (!saved) {
-      return {
-        running: false,
-        startedAtEpoch: 0,
-        accumulatedMs: 0,
-        elapsedMs: 0,
-        laps: [] as LapEntry[],
-      };
-    }
-    const safeLaps = Array.isArray(saved.laps) ? saved.laps : [];
-    if (saved.running && saved.startedAtEpoch > 0) {
-      const currentElapsed = Math.max(0, Date.now() - saved.startedAtEpoch);
-      return {
-        running: true,
-        startedAtEpoch: saved.startedAtEpoch,
-        accumulatedMs: currentElapsed,
-        elapsedMs: currentElapsed,
-        laps: safeLaps,
-      };
-    }
-    const acc = Math.max(0, Number(saved.accumulatedMs) || 0);
-    return {
-      running: false,
-      startedAtEpoch: 0,
-      accumulatedMs: acc,
-      elapsedMs: acc,
-      laps: safeLaps,
-    };
-  }, []);
+  const initialSw = useMemo(
+    () => restoreStopwatchState(readStorage<PersistedStopwatchState | null>(SW_STATE_KEY, null)),
+    [],
+  );
 
   const [elapsedMs, setElapsedMs] = useState<number>(initialSw.elapsedMs);
   const [running, setRunning] = useState<boolean>(initialSw.running);
   const [laps, setLaps] = useState<LapEntry[]>(initialSw.laps);
 
   const startedAtEpochRef = useRef<number>(initialSw.startedAtEpoch);
+  const monotonicStartedAtRef = useRef<number | null>(
+    initialSw.running ? monotonicNow() - initialSw.elapsedMs : null,
+  );
   const accumulatedRef = useRef<number>(initialSw.accumulatedMs);
   const rafRef = useRef<number | null>(null);
 
@@ -107,17 +62,19 @@ export const StopwatchPage: React.FC<StopwatchPageProps> = ({ settings }) => {
     if (!startedAtEpochRef.current) {
       startedAtEpochRef.current = Date.now() - accumulatedRef.current;
     }
+    if (monotonicStartedAtRef.current === null) {
+      monotonicStartedAtRef.current = monotonicNow() - accumulatedRef.current;
+    }
 
     const tick = () => {
-      const next = Math.max(0, Date.now() - startedAtEpochRef.current);
-      setElapsedMs(next);
+      setElapsedMs(currentElapsed(monotonicStartedAtRef.current, accumulatedRef.current));
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
 
     const onVis = () => {
-      if (document.visibilityState === 'visible' && startedAtEpochRef.current > 0) {
-        setElapsedMs(Math.max(0, Date.now() - startedAtEpochRef.current));
+      if (document.visibilityState === 'visible' && monotonicStartedAtRef.current !== null) {
+        setElapsedMs(currentElapsed(monotonicStartedAtRef.current, accumulatedRef.current));
       }
     };
     document.addEventListener('visibilitychange', onVis);
@@ -130,15 +87,17 @@ export const StopwatchPage: React.FC<StopwatchPageProps> = ({ settings }) => {
 
   const toggleRunning = useCallback(() => {
     if (running) {
-      const total = Math.max(0, Date.now() - startedAtEpochRef.current);
+      const total = currentElapsed(monotonicStartedAtRef.current, accumulatedRef.current);
       accumulatedRef.current = total;
       startedAtEpochRef.current = 0;
+      monotonicStartedAtRef.current = null;
       setElapsedMs(total);
       setRunning(false);
       persistSw(false, 0, total, laps);
     } else {
       const startEpoch = Date.now() - accumulatedRef.current;
       startedAtEpochRef.current = startEpoch;
+      monotonicStartedAtRef.current = monotonicNow() - accumulatedRef.current;
       setRunning(true);
       persistSw(true, startEpoch, accumulatedRef.current, laps);
     }
@@ -146,7 +105,7 @@ export const StopwatchPage: React.FC<StopwatchPageProps> = ({ settings }) => {
 
   const recordLap = useCallback(() => {
     if (!running) return;
-    const currentTotal = Math.max(0, Date.now() - startedAtEpochRef.current);
+    const currentTotal = currentElapsed(monotonicStartedAtRef.current, accumulatedRef.current);
     setLaps((prev) => {
       const prevTotal = prev.length > 0 ? prev[0].totalMs : 0;
       const splitMs = Math.max(0, currentTotal - prevTotal);
@@ -163,6 +122,7 @@ export const StopwatchPage: React.FC<StopwatchPageProps> = ({ settings }) => {
 
   const handleReset = useCallback(() => {
     startedAtEpochRef.current = 0;
+    monotonicStartedAtRef.current = null;
     accumulatedRef.current = 0;
     setRunning(false);
     setElapsedMs(0);
